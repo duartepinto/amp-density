@@ -108,10 +108,13 @@
     .key { display: flex; justify-content: space-between; gap: 8px; font-size: 12px; color: var(--ink-2); }
     .key i { display: inline-block; width: 8px; height: 8px; border-radius: 2px; margin-right: 5px; }
 
-    /* Metro: toggle in the title card, line badges, station hover tooltip */
-    #metro-toggle { display: flex; gap: 6px; align-items: baseline; margin-top: 8px; font-size: 12px; color: var(--ink-2); cursor: pointer; }
-    #metro-toggle[hidden] { display: none; }
-    #metro-toggle input { margin: 0; accent-color: var(--ink); }
+    /* Rail networks: one toggle each in the title card, line badges, station hover tooltip */
+    #transit-toggles label { display: flex; gap: 6px; align-items: baseline; margin-top: 8px; font-size: 12px; color: var(--ink-2); cursor: pointer; }
+    #transit-toggles input { margin: 0; accent-color: var(--ink); }
+    #transit-toggles .swatch { flex: none; width: 22px; height: 6px; border-radius: 3px; align-self: center; }
+    #transit-toggles .swatch.colours { background: linear-gradient(90deg, #3CAEEF 0 33%, #E62621 33% 66%, #8BC63E 66%); }
+    #transit-toggles .swatch.rail { background: repeating-linear-gradient(90deg, var(--surface) 0 3px, var(--ink) 3px 7px); border: 1.5px solid var(--ink); }
+    #transit-toggles p { margin: 6px 0 0 19px; font-size: 12px; color: var(--muted); }
     .station-name { font-size: 20px; font-weight: 650; margin: 0 24px 8px 0; }
     .badge {
       display: inline-flex; align-items: center; justify-content: center; min-width: 20px; height: 20px;
@@ -151,7 +154,7 @@
     <p class="muted" id="subtitle">Residents per km² · Census 2021</p>
     <div id="legend"></div>
     <p class="muted small" id="status">Loading grid…</p>
-    <label id="metro-toggle" hidden><input type="checkbox" checked> <span id="metro-summary">Metro</span></label>
+    <div id="transit-toggles"></div>
   </header>
 
   <aside class="card" id="panel" hidden>
@@ -164,7 +167,8 @@
     placed using buildings from <a href="https://www.openstreetmap.org/copyright">© OpenStreetMap</a>,
     <a href="https://overturemaps.org">Overture Maps</a> and
     <a href="https://human-settlement.emergency.copernicus.eu">GHSL</a> ·
-    metro and walking paths from OpenStreetMap
+    rail lines and walking paths from OpenStreetMap ·
+    metro timetable from <a href="https://www.metrodoporto.pt/pages/337">Metro do Porto</a>
   </footer>
 
   <script src="https://unpkg.com/maplibre-gl@4.7.1/dist/maplibre-gl.js"></script>
@@ -198,9 +202,9 @@
     };
 
     let data; // { columns: { e, n, pop }, count, cell, bounds, region }
-    let metro = null; // data/<region>_metro.js (pipeline/build_metro.py), when built
+    let transit = null; // data/<region>_transit.js (pipeline/build_transit.py), when built
     let selected = null;
-    let station = null; // index into metro.stations
+    let station = null; // index into transit.stations
     // isStyleLoaded() is false while tiles load, so track "style.load" ourselves.
     let styleReady = false;
     const startedWithView = Boolean(location.hash); // MapLibre writes the hash on load
@@ -363,23 +367,41 @@
       target.setData({ type: "FeatureCollection", features });
     }
 
-    // Metro lines, stations and the selected station's walking area. Lines sharing
-    // track are drawn side by side: each track piece carries its slot `k` across the bundle.
-    // Lines under construction are dashed, and stations not yet open are grey.
-    const METRO_LAYERS = ["metro-casing", "metro-lines", "metro-planned", "stations", "station-labels"];
+    // Rail lines (metro, trains), stations and the selected station's walking area. Lines
+    // sharing track are drawn side by side: each track piece carries its slot `k` across the
+    // bundle. Railway networks (trains) are drawn in one railway style instead, so their
+    // parallel tracks read as one corridor. Lines under construction are dashed, future
+    // stations grey.
+    const TRACK_LAYERS = ["transit-casing", "transit-lines", "transit-rail", "transit-ties", "transit-planned"];
+    const STATION_LAYERS = ["station-links-casing", "station-links", "stations"];
     const PLANNED = ["boolean", ["get", "planned"], false];
+    const RAIL = ["boolean", ["get", "rail"], false];
+    const shown = new Set(); // keys of the networks switched on
+
+    // Track pieces of the networks switched on; stations served by any of them.
+    const trackFilter = (...more) => ["all", ["in", ["get", "net"], ["literal", [...shown]]], ...more];
+    const stationFilter = () => ["any", ...[...shown].map((k) => ["boolean", ["get", `on_${k}`], false])];
+    function applyNetworkFilters() {
+      if (!map.getSource("transit")) return;
+      map.setFilter("transit-casing", trackFilter());
+      map.setFilter("transit-lines", trackFilter(["!", PLANNED], ["!", RAIL]));
+      map.setFilter("transit-rail", trackFilter(RAIL));
+      map.setFilter("transit-ties", trackFilter(RAIL));
+      map.setFilter("transit-planned", trackFilter(PLANNED));
+      for (const id of STATION_LAYERS) map.setFilter(id, stationFilter());
+      map.setFilter("station-labels", ["all", stationFilter(), ["boolean", ["get", "label"], false]]);
+    }
     const byZoom = (z9, z13, z16) => ["interpolate", ["linear"], ["zoom"], 9, z9, 13, z13, 16, z16];
     const LINE_W = [2, 3, 5];
 
-    function addMetroLayers() {
-      if (!metro || !styleReady || map.getSource("metro")) return;
+    function addTransitLayers() {
+      if (!transit || !styleReady || map.getSource("transit")) return;
       const css = getComputedStyle(document.documentElement);
       const surface = css.getPropertyValue("--surface").trim();
       const ink = css.getPropertyValue("--ink").trim();
       const muted = css.getPropertyValue("--muted").trim();
       const layers = map.getStyle().layers;
       const labelsStart = layers[layers.findLastIndex((l) => l.type !== "symbol") + 1]?.id;
-      const visibility = document.querySelector("#metro-toggle input").checked ? "visible" : "none";
 
       // Walking area: everything outside it is faded, and it gets an outline.
       map.addSource("walk", { type: "geojson", data: EMPTY });
@@ -388,38 +410,62 @@
       map.addLayer({ id: "walk-line", type: "line", source: "walk", filter: ["==", ["get", "part"], "area"],
         paint: { "line-color": ink, "line-width": 2 } }, labelsStart);
 
-      map.addSource("metro", { type: "geojson", data: metro.tracks });
+      map.addSource("transit", { type: "geojson", data: transit.tracks });
       const offset = byZoom(...LINE_W.map((w) => ["*", ["get", "k"], w]));
-      const round = { "line-cap": "round", "line-join": "round", visibility };
-      map.addLayer({ id: "metro-casing", type: "line", source: "metro", layout: round,
+      const round = { "line-cap": "round", "line-join": "round" };
+      map.addLayer({ id: "transit-casing", type: "line", source: "transit", layout: round,
         paint: { "line-color": surface, "line-width": byZoom(...LINE_W.map((w) => w + 2)), "line-offset": offset } }, labelsStart);
-      map.addLayer({ id: "metro-lines", type: "line", source: "metro", layout: round, filter: ["!", PLANNED],
+      map.addLayer({ id: "transit-lines", type: "line", source: "transit", layout: round,
         paint: { "line-color": ["get", "c"], "line-width": byZoom(...LINE_W), "line-offset": offset } }, labelsStart);
-      map.addLayer({ id: "metro-planned", type: "line", source: "metro", layout: { ...round, "line-cap": "butt" }, filter: PLANNED,
+      map.addLayer({ id: "transit-rail", type: "line", source: "transit", layout: round,
+        paint: { "line-color": ink, "line-width": byZoom(...LINE_W) } }, labelsStart);
+      map.addLayer({ id: "transit-ties", type: "line", source: "transit", layout: { "line-join": "round" },
+        paint: { "line-color": surface, "line-width": byZoom(0.6, 1.2, 2.2), "line-dasharray": [3, 3] } }, labelsStart);
+      map.addLayer({ id: "transit-planned", type: "line", source: "transit", layout: { ...round, "line-cap": "butt" },
         paint: { "line-color": ["get", "c"], "line-width": byZoom(...LINE_W), "line-dasharray": [2, 1.2] } }, labelsStart);
 
+      // An interchange whose stations stand apart (metro and train platforms, a future
+      // line's station) gets a marker at each, joined by a capsule-shaped connector, the
+      // usual transit-map sign that they are one station. All its pieces share its id.
+      const nets = (s) => Object.fromEntries(s.nets.map((k) => [`on_${k}`, true]));
       map.addSource("stations", {
         type: "geojson",
         data: {
           type: "FeatureCollection",
-          features: metro.stations.map((s, i) => ({
-            type: "Feature", id: i,
-            properties: { name: s.name, hub: s.lines.length + s.planned.length > 1, future: s.lines.length === 0 },
-            geometry: { type: "Point", coordinates: [s.lon, s.lat] },
-          })),
+          features: transit.stations.flatMap((s, i) =>
+            (s.parts ?? [[s.lon, s.lat, s.lines.length ? 0 : 1]]).map(([lon, lat, future], j) => ({
+              type: "Feature", id: i,
+              properties: { name: s.name, hub: s.lines.length + s.planned.length > 1, future: Boolean(future), label: j === 0, ...nets(s) },
+              geometry: { type: "Point", coordinates: [lon, lat] },
+            }))),
+        },
+      });
+      map.addSource("station-links", {
+        type: "geojson",
+        data: {
+          type: "FeatureCollection",
+          features: transit.stations.flatMap((s, i) => s.parts ? [{
+            type: "Feature", id: i, properties: nets(s),
+            geometry: { type: "MultiLineString", coordinates: s.parts.slice(1).map((p) => [s.parts[0].slice(0, 2), p.slice(0, 2)]) },
+          }] : []),
         },
       });
       const on = ["boolean", ["feature-state", "selected"], false];
-      map.addLayer({ id: "stations", type: "circle", source: "stations", layout: { visibility },
+      const HUB_R = [2.2, 6, 9];
+      const STROKE = [0.8, 1.8, 2.5];
+      map.addLayer({ id: "station-links-casing", type: "line", source: "station-links", layout: { "line-cap": "round" },
+        paint: { "line-color": ink, "line-width": byZoom(...HUB_R.map((r, k) => 2 * (r + STROKE[k]))) } }, labelsStart);
+      map.addLayer({ id: "station-links", type: "line", source: "station-links", layout: { "line-cap": "round" },
+        paint: { "line-color": ["case", on, ink, surface], "line-width": byZoom(...HUB_R.map((r) => 2 * r)) } }, labelsStart);
+      map.addLayer({ id: "stations", type: "circle", source: "stations",
         paint: {
-          "circle-radius": byZoom(["case", ["get", "hub"], 2.2, 1.5], ["case", ["get", "hub"], 6, 4.5], ["case", ["get", "hub"], 9, 7]),
+          "circle-radius": byZoom(...HUB_R.map((r, k) => ["case", ["get", "hub"], r, [1.5, 4.5, 7][k]])),
           "circle-color": ["case", on, ink, surface],
           "circle-stroke-color": ["case", ["get", "future"], muted, ink],
-          "circle-stroke-width": byZoom(0.8, 1.8, 2.5),
+          "circle-stroke-width": byZoom(...STROKE),
         } }, labelsStart);
       map.addLayer({ id: "station-labels", type: "symbol", source: "stations", minzoom: 13,
         layout: {
-          visibility,
           "text-field": ["get", "name"],
           "text-font": ["Montserrat Medium", "Open Sans Regular", "Noto Sans Regular"],
           "text-size": 12,
@@ -428,12 +474,17 @@
           "text-optional": true,
         },
         paint: { "text-color": ["case", ["get", "future"], muted, ink], "text-halo-color": surface, "text-halo-width": 1.5 } });
+      applyNetworkFilters();
       if (station !== null) showWalk(station);
     }
 
+    function markStation(i, selected) {
+      for (const source of ["stations", "station-links"]) map.setFeatureState({ source, id: i }, { selected });
+    }
+
     function showWalk(i) {
-      map.setFeatureState({ source: "stations", id: i }, { selected: true });
-      const walk = metro.stations[i].walk;
+      markStation(i, true);
+      const walk = transit.stations[i].walk;
       // Mask = the world with the walking area cut out. Ring winding tells MapLibre
       // which rings are holes: the area's outer rings are reversed to become holes,
       // and its own holes are reversed to become islands of mask.
@@ -451,19 +502,26 @@
 
     // Badge text: dark on light line colours (Line D yellow), white otherwise.
     function badge(ref) {
-      // Service variants (Bx, the B express) take their line's colour.
-      const line = metro.lines.find((l) => l.ref === ref) ?? metro.lines.find((l) => ref.startsWith(l.ref));
-      if (line.planned) return `<span class="badge planned" style="border-color:${line.colour}">${ref}</span>`;
+      // Service variants in timetables (Bx, the B express) take their line's colour.
+      const exact = transit.lines.find((l) => l.ref === ref);
+      const line = exact ?? transit.lines.find((l) => ref.startsWith(l.ref));
+      const text = exact ? line.label : ref;
+      if (line.planned) return `<span class="badge planned" style="border-color:${line.colour}">${text}</span>`;
       const [r, g, b] = [1, 3, 5].map((k) => parseInt(line.colour.slice(k, k + 2), 16) / 255);
       const light = 0.2126 * r + 0.7152 * g + 0.0722 * b > 0.55;
-      return `<span class="badge" style="background:${line.colour};color:${light ? "#1a1a19" : "#ffffff"}">${ref}</span>`;
+      return `<span class="badge" style="background:${line.colour};color:${light ? "#1a1a19" : "#ffffff"}">${text}</span>`;
     }
+    const lineOf = (ref) => transit.lines.find((l) => l.ref === ref);
 
     // Minutes between trains in each direction, per line and for all lines together,
     // from the trains per hour counted in the timetable.
     function trainsBlock(s) {
-      const t = metro.timetable;
-      if (!t || !s.freq?.all) return "";
+      const net = transit.networks.find((n) => n.timetable);
+      const t = net?.timetable;
+      const without = transit.networks.filter((n) => !n.timetable && s.lines.some((r) => lineOf(r).net === n.key));
+      const missing = without.length ? `<p class="note">No timetable for ${without.map((n) => n.network).join(", ")} yet.</p>` : "";
+      if (!t || !s.freq?.all) return without.length && s.lines.length ? `<h2>Frequency</h2>${missing}` : "";
+      const noun = s.nets.length > 1 ? `${net.label.toLowerCase()} trains` : "trains";
       const wait = (tph) => {
         if (!(tph > 0)) return "–";
         const m = 60 / tph;
@@ -477,8 +535,8 @@
       const weekend = [...new Set(t.periods.filter((p) => p.day !== "monday").map((p) => p.hours))].join(", ");
       const date = (d) => new Date(d).toLocaleDateString("en-GB", { day: "numeric", month: "short", year: "numeric" });
       return `
-        <h2>Trains</h2>
-        <p class="trains-total"><b>${fmtInt.format(s.freq.all[0])}</b> trains an hour stop here at weekday peak, both directions</p>
+        <h2>Frequency</h2>
+        <p class="trains-total"><b>${fmtInt.format(s.freq.all[0])}</b> ${noun} an hour stop here at weekday peak, both directions</p>
         <table class="freq">
           <thead><tr><th></th>${head}</tr></thead>
           <tbody>
@@ -488,20 +546,27 @@
         </table>
         <p class="note">
           Minutes between trains in each direction. Weekdays: ${weekday}; weekends ${weekend}.
-          From Metro do Porto's timetable for ${date(t.from)} – ${date(t.to)}.
-        </p>`;
+          From ${net.network}'s timetable for ${date(t.from)} – ${date(t.to)}.
+        </p>${missing}`;
     }
 
     function showStation(i) {
-      const s = metro.stations[i];
-      const w = metro.walk;
-      const lines = [...s.lines, ...s.planned].map((ref) => {
-        const line = metro.lines.find((l) => l.ref === ref);
-        const [, word, ends] = line.name.match(/^Linha (\S+):\s*(.*)$/) || [, "", line.name];
+      const s = transit.stations[i];
+      const w = transit.walk;
+      const item = (ref) => {
+        const line = lineOf(ref);
+        const word = line.name.match(/^Linha (\S+)$/)?.[1];
         const label = line.planned
-          ? `${word} line, ${ends} · <i>under construction${line.opening ? `, opening ${line.opening}` : ""}</i>`
-          : ends;
+          ? `${word ? `${word} line, ` : ""}${line.ends} · <i>under construction${line.opening ? `, opening ${line.opening}` : ""}</i>`
+          : line.ends;
         return `<li>${badge(ref)} <span>${label}</span></li>`;
+      };
+      // Lines grouped by network: "Metro", "Trains (CP Porto)".
+      const lines = transit.networks.map((n) => {
+        const refs = [...s.lines, ...s.planned].filter((r) => lineOf(r).net === n.key);
+        if (!refs.length) return "";
+        const title = n.network.includes(n.label) ? n.label : `${n.label} (${n.network})`;
+        return `<h2>${title}</h2><ul class="line-list">${refs.map(item).join("")}</ul>`;
       }).join("");
       const future = s.lines.length === 0;
       document.getElementById("panel-body").innerHTML = `
@@ -519,15 +584,14 @@
           along streets, footpaths and stairs mapped in OpenStreetMap, from the station's platforms.
           Residents are the census grid's, counting the share of each cell inside the area.
         </p>
-        <h2>Lines</h2>
-        <ul class="line-list">${lines}</ul>
+        ${lines}
         ${trainsBlock(s)}
       `;
       document.getElementById("panel").hidden = false;
     }
 
     function selectStation(i) {
-      if (station !== null && map.getSource("stations")) map.setFeatureState({ source: "stations", id: station }, { selected: false });
+      if (station !== null && map.getSource("stations")) markStation(station, false);
       station = i;
       if (i === null) {
         map.getSource("walk")?.setData(EMPTY);
@@ -536,7 +600,7 @@
       select(null);
       showWalk(i);
       showStation(i);
-      const [w, s, e, n] = metro.stations[i].walk.flat(2).reduce(
+      const [w, s, e, n] = transit.stations[i].walk.flat(2).reduce(
         ([w, s, e, n], [x, y]) => [Math.min(w, x), Math.min(s, y), Math.max(e, x), Math.max(n, y)],
         [Infinity, Infinity, -Infinity, -Infinity]);
       const narrow = innerWidth <= 640;
@@ -653,9 +717,10 @@
       map.getCanvas().style.cursor = "pointer";
       if (tipFor === hit.id) return;
       tipFor = hit.id;
-      const s = metro.stations[hit.id];
-      const soon = s.planned.length ? `${s.lines.length ? " + " : ""}${s.planned.join(" ")} under construction` : "";
-      tip.setLngLat([s.lon, s.lat]).setHTML(`<b>${s.name}</b> · ${s.lines.join(" ")}${soon}`).addTo(map);
+      const s = transit.stations[hit.id];
+      const labels = (refs) => refs.map((r) => lineOf(r).label).join(" ");
+      const soon = s.planned.length ? `${s.lines.length ? " + " : ""}${labels(s.planned)} under construction` : "";
+      tip.setLngLat([s.lon, s.lat]).setHTML(`<b>${s.name}</b> · ${labels(s.lines)}${soon}`).addTo(map);
     });
     map.on("click", (ev) => {
       const st = stationAt(ev.point);
@@ -668,9 +733,12 @@
     const clearAll = () => { select(null); selectStation(null); };
     document.getElementById("close").addEventListener("click", clearAll);
     document.addEventListener("keydown", (ev) => ev.key === "Escape" && clearAll());
-    document.querySelector("#metro-toggle input").addEventListener("change", (ev) => {
-      for (const id of METRO_LAYERS) if (map.getLayer(id)) map.setLayoutProperty(id, "visibility", ev.target.checked ? "visible" : "none");
-      if (!ev.target.checked && station !== null) clearAll();
+    document.getElementById("transit-toggles").addEventListener("change", (ev) => {
+      const key = ev.target.dataset.net;
+      if (ev.target.checked) shown.add(key);
+      else shown.delete(key);
+      applyNetworkFilters();
+      if (station !== null && !transit.stations[station].nets.some((k) => shown.has(k))) clearAll();
     });
 
     // Switching theme swaps the basemap style, which drops our layers: re-add them.
@@ -694,7 +762,7 @@
       styleReady = true;
       highlightedView = ""; // a new basemap means new building tiles: redo the highlight
       addLayers();
-      addMetroLayers();
+      addTransitLayers();
     });
 
     function loadScript(src, global) {
@@ -708,18 +776,30 @@
     }
     const loadData = () => loadScript(`data/${REGION}.js`, "GRID_DATA");
 
-    // The metro layer is optional: regions without data/<region>_metro.js just skip it.
-    loadScript(`data/${REGION}_metro.js`, "METRO_DATA")
+    // One toggle per rail network, with the share of residents near its stations.
+    function renderToggles() {
+      const pct = (v) => Math.round((100 * v) / transit.total_pop);
+      const minutes = transit.walk.minutes;
+      const rows = transit.networks.map((n) => {
+        const building = transit.lines.filter((l) => l.net === n.key && l.planned)
+          .map((l) => l.name.match(/^Linha (\S+)$/)?.[1] ?? l.label);
+        const text = `${n.network}: ${n.stations} stations · ${pct(n.covered_pop)}% of residents live within a ${minutes}-min walk` +
+          (building.length && n.covered_pop_planned ? `; ${pct(n.covered_pop_planned)}% once the ${building.join(" and ")} lines (dashed) open` : "");
+        const style = transit.tracks.features.some((f) => f.properties.net === n.key && f.properties.rail) ? "rail" : "colours";
+        return `<label><input type="checkbox" data-net="${n.key}" ${shown.has(n.key) ? "checked" : ""}>
+          <i class="swatch ${style}"></i><span>${text}</span></label>`;
+      });
+      if (transit.networks.length > 1) rows.push(`<p>${pct(transit.covered_pop)}% live within a ${minutes}-min walk of any station.</p>`);
+      document.getElementById("transit-toggles").innerHTML = rows.join("");
+    }
+
+    // The rail layer is optional: regions without data/<region>_transit.js just skip it.
+    loadScript(`data/${REGION}_transit.js`, "TRANSIT_DATA")
       .then((json) => {
-        metro = json;
-        const pct = (v) => Math.round((100 * v) / metro.total_pop);
-        const open = metro.stations.filter((s) => s.lines.length).length;
-        const building = metro.lines.filter((l) => l.planned).map((l) => l.name.match(/^Linha ([^\s:]+)/)?.[1] ?? l.ref);
-        document.getElementById("metro-summary").textContent =
-          `${metro.network}: ${open} stations · ${pct(metro.covered_pop)}% of residents live within a ${metro.walk.minutes}-min walk` +
-          (building.length ? `; ${pct(metro.covered_pop_planned)}% once the ${building.join(" and ")} lines (dashed) open` : "");
-        document.getElementById("metro-toggle").hidden = false;
-        addMetroLayers();
+        transit = json;
+        for (const n of transit.networks) shown.add(n.key);
+        renderToggles();
+        addTransitLayers();
       })
       .catch(() => {});
 

@@ -6,7 +6,7 @@ households and average household size, its residential buildings split into sing
 apartment buildings and into 1–2 vs 3+ floors, and the average floors of its apartment buildings
 where OpenStreetMap maps them. When zoomed in (z13+), the cell's buildings are highlighted on the map.
 
-The metro lines and stations are drawn on top; click a station to see the area within a 10-minute
+The metro and CP suburban train lines and stations are drawn on top; click a station to see the area within a 10-minute
 walk of it, how many residents live there, and how often trains call (minutes between trains per
 line at weekday peak, midday and evening and at weekends).
 
@@ -22,7 +22,7 @@ MapLibre/proj4 libraries come from CDNs. To publish, upload `index.html` and `da
 | Residents, dwellings, households and residential buildings per statistical subsection (Census 2021, BGRI 2021) | [INE](https://gisserver.ine.pt/arcgis/rest/services/BGRI2021/BGRI/FeatureServer/0), falls back to an ArcGIS Online republication | the counts |
 | Building footprints + tags | OpenStreetMap ([Geofabrik](https://download.geofabrik.de/europe/portugal.html)) | placing residents inside each census subsection |
 | ML building footprints | [Overture Maps](https://overturemaps.org) (Microsoft, Esri) | filling OSM gaps outside the big cities |
-| Metro timetables (GTFS) | [Metro do Porto](https://www.metrodoporto.pt/pages/337) | train frequencies at each station |
+| Metro timetables (GTFS) | [Metro do Porto](https://www.metrodoporto.pt/pages/337) | metro frequencies at each station (no CP timetable yet) |
 | Net building height, population (100 m) | [GHSL](https://human-settlement.emergency.copernicus.eu) GHS-BUILT-H ANBH 2018, GHS-POP 2020 | floors where OSM has none; fallback for subsections with no buildings |
 
 ## How the numbers are made, and how accurate they are
@@ -55,9 +55,15 @@ and comparing against the real figures, scaled to the equivalent cell size. Medi
 These are slightly optimistic, because the comparison grid is itself an estimate. Change the cell
 size with `CELL` in `pipeline/build_grid.py`; its `ERRORS` table feeds the popup.
 
-### Metro walking areas
+### Metro, trains and walking areas
 
-Lines and stations come from OpenStreetMap's Metro do Porto route relations. The Rosa (G) and Rubi (H)
+Lines and stations come from OpenStreetMap's route relations for Metro do Porto and CP Porto (the
+suburban trains), grouped into lines by their route masters; the networks are configured under
+`transit` in `pipeline/regions.py`. Only stations inside the AMP are kept. Metro lines take their
+colours; trains are drawn in one railway style, because different train lines often run on parallel
+tracks a few metres apart and two CP colours match metro lines. A metro and a train station with
+the same name are one interchange when their stops are within 250 m (Campanhã, São Bento, General
+Torres); further apart they stay separate (Hospital São João, Contumil). The Rosa (G) and Rubi (H)
 lines, under construction, are drawn dashed from OSM's construction track and station sites; their
 colours are our own until official ones exist. Rubi's Arrábida, Candal and Rotunda stations are not in
 OSM yet, so they are placed on the track by their described locations (Arrábida Shopping, the Candal
@@ -91,7 +97,7 @@ uv run python pipeline/fetch_overture.py amp
 uv run python pipeline/build_grid.py amp     # -> data/amp.js
 # Metro do Porto timetables ("GTFS Horários" on https://www.metrodoporto.pt/pages/337):
 curl -L -o data/raw/gtfs/amp_metro.zip https://www.metrodoporto.pt/metrodoporto/uploads/document/file/794/google_transit_04_09_2026.zip
-uv run python pipeline/build_metro.py amp    # -> data/amp_metro.js (needs data/amp.js)
+uv run python pipeline/build_transit.py amp  # -> data/amp_transit.js (needs data/amp.js)
 
 # Not used by the grid yet: DGT LiDAR surface/terrain tiles for building heights
 # (needs a free cdd.dgterritorio.gov.pt account in ~/.dgt; ~4.4 GB for the AMP)
