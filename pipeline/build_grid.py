@@ -9,6 +9,9 @@ inside it:
 
 * buildings: OSM footprints, complemented by Overture's machine-learned footprints
   (Microsoft / Esri) where OSM has no building mapped yet
+* buildings inside non-residential OSM areas (campuses, hospitals, parks, cemeteries,
+  industrial land...) are skipped unless tagged as homes, as long as their subsection
+  has other buildings to hold its residents
 * floors: OSM `building:levels`, else GHSL GHS-BUILT-H net height / 3 m
 * residents, dwellings, households -> proportional to residential floor area
   (footprint x floors)
@@ -28,6 +31,7 @@ Usage: uv run python pipeline/build_grid.py amp
 """
 
 import json
+import re
 import sys
 from pathlib import Path
 
@@ -76,6 +80,25 @@ PUBLIC = {
     "kindergarten", "cathedral", "monastery", "convent", "religious", "museum", "sports_centre",
     "grandstand", "clinic", "townhall", "police", "military",
 }
+# Untagged (building=yes) buildings whose name starts like this are not homes: a sports
+# hall, church, school, shop... Names of homes (Casa, Edifício, Bloco, Torre, Moradia,
+# Residência, Lar - care homes count their residents) are not listed.
+NOT_A_HOME_NAME = re.compile(
+    r"^(?:centro|junta|pavilh[aã]o|caf[eé]|capela|restaurante|igreja|associa[cç][aã]o|pingo doce|continente|"
+    r"escola|sal[aã]o|lidl|piscinas?|museu|bombeiros|mercado|hotel|sede|coreto|mercadona|lavadouro|bar|"
+    r"c[aâ]mara|posto|padaria|burger|clube|moinho|esta[cç][aã]o|biblioteca|tribunal|gnr|psp|usf|"
+    r"unidade de sa[uú]de|mcdonald|garagem|aldi|mosteiro|quiosque|oficina|auchan|intermarch[eé]|adega|"
+    r"teatro|audit[oó]rio|f[aá]brica|armaz[eé]m|supermercado|hipermercado|hospital|cl[ií]nica|farm[aá]cia|"
+    r"instituto|faculdade|universidade|col[eé]gio|jardim de inf[aâ]ncia|infant[aá]rio|creche|gin[aá]sio|"
+    r"est[aá]dio|complexo|pol[ií]cia|quartel|cemit[eé]rio|cinema|banco|ctt|correios|loja|minipre[cç]o|"
+    r"ermida|santu[aá]rio|convento|semin[aá]rio|cruzeiro|fonte|reservat[oó]rio)\b"
+)
+# Status and use tags that rule out a home, on any building.
+NOT_A_HOME_TAGS = ["ruins", "abandoned", "disused", "leisure", "sport", "man_made", "healthcare"]
+HISTORIC_HOMES = {"building", "manor", "house"}
+# amenity/tourism values that still describe homes (care homes count their residents)
+HOME_AMENITIES = {"social_facility", "nursing_home", "retirement_home", "shelter"}
+HOME_TOURISM = {"apartment", "chalet"}
 APARTMENT_TAGS = {"apartments", "residential", "dormitory"}
 HOUSE_TAGS = {"house", "detached", "semidetached_house", "terrace", "bungalow", "farm"}
 MIN_FOOTPRINT_M2 = 20
@@ -88,12 +111,20 @@ FIELDS = [*AREA_FIELDS, *COUNTS]
 def is_residential(b: gpd.GeoDataFrame) -> pd.Series:
     tag = b["building"].fillna("yes")
     use = b["building_use"].fillna("")
-    business = (tag == "yes") & (b["shop"].notna() | b["office"].notna() | b["tourism"].isin({"hotel", "hostel"}))
+    business = (tag == "yes") & (
+        b["shop"].notna() | b["office"].notna()
+        | (b["tourism"].notna() & ~b["tourism"].isin(HOME_TOURISM))
+        | (b["amenity"].notna() & ~b["amenity"].isin(HOME_AMENITIES))
+    )
+    named = (tag == "yes") & b["name"].fillna("").str.lower().str.strip().str.contains(NOT_A_HOME_NAME)
+    status = b[NOT_A_HOME_TAGS].notna().any(axis=1) | (b["historic"].notna() & ~b["historic"].isin(HISTORIC_HOMES))
     return ~(
         tag.isin(NOT_A_DWELLING | COMMERCIAL | INDUSTRIAL | PUBLIC)
         | use.isin(COMMERCIAL | INDUSTRIAL)
         | b["amenity"].isin(PUBLIC)
         | business
+        | named
+        | status
         | (b.area < MIN_FOOTPRINT_M2)
     )
 
@@ -135,7 +166,7 @@ def load_buildings(raw: Path) -> gpd.GeoDataFrame:
     # ML footprints carry no tags: they behave like an OSM building=yes.
     ml = ml.rename(columns={"num_floors": "building_levels"})[["building_levels", "geometry"]]
     b = pd.concat([osm.assign(src="osm"), ml.assign(src="ml")], ignore_index=True)
-    for col in ["building", "building_use", "shop", "office", "amenity", "tourism"]:
+    for col in ["building", "building_use", "shop", "office", "amenity", "tourism", "name", "historic", *NOT_A_HOME_TAGS]:
         b[col] = b[col].astype(object)
     b = b[is_residential(b)].copy()
 
@@ -148,7 +179,15 @@ def load_buildings(raw: Path) -> gpd.GeoDataFrame:
     b["score"] = apartment_score(b)
     b["tall"] = tall_score(b)
     b["apartment_like"] = b["building"].isin(APARTMENT_TAGS) | (b.osm_levels >= 3)
-    return b[["levels", "osm_levels", "apartment_like", "full_area", "score", "tall", "geometry"]]
+
+    # Untagged buildings on a campus, in a park, a hospital... are not homes.
+    areas = gpd.read_file(raw / "osm_nonres_areas.gpkg").to_crs(CRS)
+    inside = gpd.sjoin(gpd.GeoDataFrame(geometry=b.geometry.representative_point(), crs=CRS),
+                       areas[["geometry"]], predicate="within", how="inner").index.unique()
+    homes = b["building"].isin(APARTMENT_TAGS | HOUSE_TAGS)
+    b["nonres_area"] = b.index.isin(inside) & ~homes
+    print(f"{b.nonres_area.sum()} candidate buildings stand in non-residential areas")
+    return b[["levels", "osm_levels", "apartment_like", "full_area", "score", "tall", "nonres_area", "geometry"]]
 
 
 def allocate(pieces: pd.DataFrame, totals: pd.DataFrame, unit: str) -> pd.DataFrame:
@@ -244,6 +283,14 @@ def main(region: str) -> None:
     print(f"{len(census)} subsections")
     buildings = load_buildings(raw)
     pieces = cut_by(buildings, census)
+
+    # Buildings in non-residential areas only hold a subsection's residents when it has no other.
+    elsewhere = ~pieces.nonres_area
+    has_other = elsewhere.groupby(pieces.BGRI2021).transform("any")
+    kept_in_area = pieces[pieces.nonres_area & ~has_other]
+    print(f"{pieces.nonres_area.sum() - len(kept_in_area)} building pieces in non-residential areas skipped; "
+          f"{kept_in_area.BGRI2021.nunique()} subsections have no other buildings and keep theirs")
+    pieces = pieces[elsewhere | ~has_other]
 
     res = allocate(pieces, census.set_index("BGRI2021"), "BGRI2021")
     centre = res.geometry.centroid
