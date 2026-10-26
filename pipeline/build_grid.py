@@ -1,20 +1,28 @@
-"""Build the 250 m x 250 m population grid for a region and write the web map data file.
+"""Build the 250 m x 250 m grid for a region and write the web map data file.
 
 Method
 ------
-Residents (INE Census 2021, BGRI) are published per statistical subsection. Those
+Census 2021 counts (INE BGRI) are published per statistical subsection. Those
 rarely line up with the grid (EPSG:3035, the INSPIRE/Eurostat grid), so each
-subsection's residents are spread over the cells it touches in proportion to the
-residential floor area (footprint x floors) of the buildings inside it:
+subsection's counts are spread over the cells it touches through the buildings
+inside it:
 
 * buildings: OSM footprints, complemented by Overture's machine-learned footprints
   (Microsoft / Esri) where OSM has no building mapped yet
 * floors: OSM `building:levels`, else GHSL GHS-BUILT-H net height / 3 m
+* residents, dwellings, households -> proportional to residential floor area
+  (footprint x floors)
+* residential buildings -> one per footprint; the subsection's apartment buildings
+  (built for 3+ dwellings) go to the footprints most likely to be apartments
+  (OSM apartment tags, then the largest floor area), the single-family ones
+  (built for 1-2 dwellings) to the rest. Buildings with 3+ floors are placed the
+  same way, ranked by mapped OSM floors first.
+* average floors of apartment buildings: only where OSM maps `building:levels`
 * subsections without any matching building fall back to the GHSL GHS-POP
   100 m population surface (or plain area when GHSL sees nobody there)
 
-Median cell error of this allocation, measured by rebuilding the census from
-coarser sections (see README): ~14% at 250 m, ~7% at 500 m, 20-40% at 100 m.
+Median cell errors, measured by rebuilding the census from coarser sections, are
+in ERRORS below and in the README.
 
 Usage: uv run python pipeline/build_grid.py amp
 """
@@ -34,7 +42,12 @@ from regions import REGIONS
 
 ROOT = Path(__file__).resolve().parent.parent
 CELL = 250  # metres
-TYPICAL_ERROR = {100: "20–40%", 200: "15%", 250: "14%", 500: "7%", 1000: "5%"}  # median, per cell
+# Median per-cell error by cell size. "pop" also holds for dwellings and households.
+ERRORS = {
+    100: {"pop": "20–40%", "res_bldg": "12–30%", "apt_share": "11 pts"},
+    250: {"pop": "14%", "res_bldg": "8%", "apt_share": "4 pts", "rise_share": "9 pts", "hh_size": "3%"},
+    500: {"pop": "7%", "res_bldg": "4%", "apt_share": "3 pts"},
+}
 FINE = 100  # metres; resolution of the GHSL fallback surface
 CRS = 3035
 FLOOR_HEIGHT_M = 3.0
@@ -63,7 +76,13 @@ PUBLIC = {
     "kindergarten", "cathedral", "monastery", "convent", "religious", "museum", "sports_centre",
     "grandstand", "clinic", "townhall", "police", "military",
 }
+APARTMENT_TAGS = {"apartments", "residential", "dormitory"}
+HOUSE_TAGS = {"house", "detached", "semidetached_house", "terrace", "bungalow", "farm"}
 MIN_FOOTPRINT_M2 = 20
+
+AREA_FIELDS = ["pop", "dwellings", "households"]
+COUNTS = ["res_bldg", "houses", "apt_bldg", "low_rise", "mid_rise"]
+FIELDS = [*AREA_FIELDS, *COUNTS]
 
 
 def is_residential(b: gpd.GeoDataFrame) -> pd.Series:
@@ -77,6 +96,19 @@ def is_residential(b: gpd.GeoDataFrame) -> pd.Series:
         | business
         | (b.area < MIN_FOOTPRINT_M2)
     )
+
+
+def apartment_score(b: gpd.GeoDataFrame) -> pd.Series:
+    """Higher = more likely an apartment building: OSM tags first, then floor area."""
+    tag = b["building"].fillna("yes")
+    score = np.log1p(b.area * b["levels"])
+    return score + np.where(tag.isin(APARTMENT_TAGS), 100, 0) - np.where(tag.isin(HOUSE_TAGS), 100, 0)
+
+
+def tall_score(b: gpd.GeoDataFrame) -> pd.Series:
+    """Higher = more likely to have 3+ floors: mapped OSM floors decide, else as apartments."""
+    known = b["osm_levels"]
+    return b["score"] + np.where(known >= 3, 200, 0) - np.where(known <= 2, 200, 0)
 
 
 def sample_ghsl(raster: Path, points: gpd.GeoSeries) -> np.ndarray:
@@ -94,8 +126,73 @@ def cell_index(x: np.ndarray, y: np.ndarray) -> tuple[np.ndarray, np.ndarray]:
     return np.floor(x / CELL).astype(np.int64), np.floor(y / CELL).astype(np.int64)
 
 
+def load_buildings(raw: Path) -> gpd.GeoDataFrame:
+    """Residential-candidate footprints (OSM + ML) with floors and apartment score."""
+    osm = gpd.read_file(raw / "osm_buildings.gpkg").to_crs(CRS)
+    ml = gpd.read_file(raw / "overture_buildings.gpkg").to_crs(CRS)
+    print(f"{len(osm)} OSM + {len(ml)} ML buildings")
+
+    # ML footprints carry no tags: they behave like an OSM building=yes.
+    ml = ml.rename(columns={"num_floors": "building_levels"})[["building_levels", "geometry"]]
+    b = pd.concat([osm.assign(src="osm"), ml.assign(src="ml")], ignore_index=True)
+    for col in ["building", "building_use", "shop", "office", "amenity", "tourism"]:
+        b[col] = b[col].astype(object)
+    b = b[is_residential(b)].copy()
+
+    levels = pd.to_numeric(b["building_levels"], errors="coerce")
+    levels = levels.where((levels >= 1) & (levels <= 60))
+    b["osm_levels"] = levels.where(b.src == "osm")
+    ghsl_levels = sample_ghsl(GHSL_HEIGHT, b.geometry.centroid) / FLOOR_HEIGHT_M
+    b["levels"] = levels.fillna(pd.Series(np.clip(ghsl_levels, 1, None), index=b.index)).fillna(1)
+    b["full_area"] = b.area
+    b["score"] = apartment_score(b)
+    b["tall"] = tall_score(b)
+    b["apartment_like"] = b["building"].isin(APARTMENT_TAGS) | (b.osm_levels >= 3)
+    return b[["levels", "osm_levels", "apartment_like", "full_area", "score", "tall", "geometry"]]
+
+
+def allocate(pieces: pd.DataFrame, totals: pd.DataFrame, unit: str) -> pd.DataFrame:
+    """Spread each unit's census totals over its building pieces.
+
+    `pieces` are footprints already cut along unit borders, with columns
+    unit, area, levels, full_area, score. `totals` is indexed by unit.
+    """
+    p = pieces.join(totals[FIELDS], on=unit)
+    g = p.groupby(unit)
+
+    fa = p.area * p.levels
+    fa_share = fa / fa.groupby(p[unit]).transform("sum")
+    for field in AREA_FIELDS:
+        p[field] = p[field] * fa_share
+
+    # A building cut in two counts as half a building on each side.
+    cw = p.area / p.full_area
+    p["res_bldg"] = p.res_bldg * cw / cw.groupby(p[unit]).transform("sum")
+
+    p = p.assign(cw=cw)
+    p = ranked_split(p, unit, "score", top="apt_bldg", rest="houses")
+    return ranked_split(p, unit, "tall", top="mid_rise", rest="low_rise")
+
+
+def ranked_split(p: pd.DataFrame, unit: str, rank: str, top: str, rest: str) -> pd.DataFrame:
+    """Split a unit's `top` + `rest` counts over its footprints: walk them from highest to
+    lowest `rank` and give `top` to the first ones until its census share is reached."""
+    p = p.sort_values([unit, rank], ascending=[True, False])
+    g = p.groupby(unit)
+    total_cw = g.cw.transform("sum")
+    before = g.cw.cumsum() - p.cw
+    known = (p[top] + p[rest]).replace(0, np.nan)
+    target = (p[top] / known).fillna(0) * total_cw
+    top_frac = ((target - before) / p.cw).clip(0, 1)
+    for field, w in [(top, p.cw * top_frac), (rest, p.cw * (1 - top_frac))]:
+        wsum = w.groupby(p[unit]).transform("sum")
+        share = (w / wsum).where(wsum > 0, p.cw / total_cw)
+        p[field] = p[field] * share
+    return p
+
+
 def fallback_allocation(subsections: gpd.GeoDataFrame) -> pd.DataFrame:
-    """Spread residents of subsections by GHSL population x area share, on a 100 m subgrid."""
+    """Spread counts of subsections by GHSL population x area share, on a 100 m subgrid."""
     rows = []
     for sub in subsections.itertuples():
         minx, miny, maxx, maxy = sub.geometry.bounds
@@ -111,57 +208,76 @@ def fallback_allocation(subsections: gpd.GeoDataFrame) -> pd.DataFrame:
             share = ghsl / ghsl.sum()
         keep = share > 0
         e, n = cell_index(cx[keep], cy[keep])
-        rows.append(pd.DataFrame({"e": e, "n": n, "pop": sub.pop * share[keep]}))
-    return pd.concat(rows) if rows else pd.DataFrame(columns=["e", "n", "pop"])
+        rows.append(pd.DataFrame({"e": e, "n": n, **{f: getattr(sub, f) * share[keep] for f in FIELDS}}))
+    return pd.concat(rows) if rows else pd.DataFrame(columns=["e", "n", *FIELDS])
+
+
+def load_census(raw: Path) -> gpd.GeoDataFrame:
+    census = gpd.read_file(raw / "bgri2021.gpkg").to_crs(CRS)
+    census["geometry"] = census.geometry.make_valid()
+    census = census.rename(columns={
+        "N_INDIVIDUOS": "pop",
+        "N_ALOJAMENTOS_TOTAL": "dwellings",
+        "N_AGREGADOS_DOMESTICOS_PRIVADO": "households",
+        "N_EDIFICIOS_CLASSICOS": "res_bldg",
+        "N_EDIFICIOS_CLASS_CONST_1_OU_2": "houses",
+        "N_EDIFICIOS_CLASS_CONST_3_OU_M": "apt_bldg",
+        "N_EDIFICIOS_1_OU_2_PISOS": "low_rise",
+        "N_EDIFICIOS_3_OU_MAIS_PISOS": "mid_rise",
+    })
+    census[FIELDS] = census[FIELDS].fillna(0)
+    return census
+
+
+def cut_by(buildings: gpd.GeoDataFrame, census: gpd.GeoDataFrame) -> gpd.GeoDataFrame:
+    """Cut buildings along subsection borders: terraced rows are often mapped as one
+    polygon spanning several census blocks."""
+    pieces = gpd.overlay(buildings, census[["BGRI2021", "geometry"]], how="intersection", keep_geom_type=True)
+    pieces = pieces[pieces.area >= 5].copy()
+    pieces["area"] = pieces.area
+    return pieces
 
 
 def main(region: str) -> None:
     raw = ROOT / "data/raw" / region
-    census = gpd.read_file(raw / "bgri2021.gpkg").to_crs(CRS)
-    census["geometry"] = census.geometry.make_valid()
-    census = census.rename(columns={"N_INDIVIDUOS": "pop"})
-    census["pop"] = census["pop"].fillna(0)
-    osm = gpd.read_file(raw / "osm_buildings.gpkg").to_crs(CRS)
-    ml = gpd.read_file(raw / "overture_buildings.gpkg").to_crs(CRS)
-    print(f"{len(census)} subsections, {len(osm)} OSM + {len(ml)} ML buildings")
+    census = load_census(raw)
+    print(f"{len(census)} subsections")
+    buildings = load_buildings(raw)
+    pieces = cut_by(buildings, census)
 
-    # ML footprints carry no tags: they behave like an OSM building=yes.
-    ml = ml.rename(columns={"num_floors": "building_levels"})[["building_levels", "geometry"]]
-    buildings = pd.concat([osm, ml], ignore_index=True)
-    for col in ["building", "building_use", "shop", "office", "amenity", "tourism"]:
-        buildings[col] = buildings[col].astype(object)
-    buildings = buildings[is_residential(buildings)]
+    res = allocate(pieces, census.set_index("BGRI2021"), "BGRI2021")
+    centre = res.geometry.centroid
+    res["e"], res["n"] = cell_index(centre.x.values, centre.y.values)
 
-    levels = pd.to_numeric(buildings["building_levels"], errors="coerce")
-    levels = levels.where((levels >= 1) & (levels <= 60))
-    ghsl_levels = sample_ghsl(GHSL_HEIGHT, buildings.geometry.centroid) / FLOOR_HEIGHT_M
-    buildings["levels"] = levels.fillna(pd.Series(np.clip(ghsl_levels, 1, None), index=buildings.index)).fillna(1)
-
-    # Cut buildings along subsection borders: terraced rows are often mapped as one
-    # polygon spanning several census blocks.
-    res = gpd.overlay(buildings[["levels", "geometry"]], census[["BGRI2021", "geometry"]],
-                      how="intersection", keep_geom_type=True)
-    res = res[res.area >= 5]
-    piece = res.geometry.centroid
-    res["e"], res["n"] = cell_index(piece.x.values, piece.y.values)
-    res["floor_area"] = res.area * res.levels
-    res["w"] = res.floor_area / res.groupby("BGRI2021").floor_area.transform("sum")
-    res = res.merge(census[["BGRI2021", "pop"]], on="BGRI2021")
-    res["pop"] = res["pop"] * res.w
-
-    orphan = census[~census.BGRI2021.isin(set(res.BGRI2021)) & (census["pop"] > 0)]
+    orphan = census[~census.BGRI2021.isin(set(res.BGRI2021)) & ((census["pop"] > 0) | (census.res_bldg > 0))]
     print(f"{len(orphan)} populated subsections without any building "
           f"({orphan['pop'].sum():.0f} residents) -> GHSL population weighting")
 
-    cells = pd.concat([res[["e", "n", "pop"]], fallback_allocation(orphan)]).groupby(["e", "n"]).sum().reset_index()
-    cells = cells[cells["pop"] >= 0.5]
+    cells = pd.concat([res[["e", "n", *FIELDS]], fallback_allocation(orphan)]).groupby(["e", "n"]).sum().reset_index()
+    cells = cells[(cells["pop"] >= 0.5) | (cells.res_bldg >= 0.5)]
+    cells = cells.join(apartment_floors(buildings), on=["e", "n"])
+    cells[["apt_floors", "apt_floors_n"]] = cells[["apt_floors", "apt_floors_n"]].fillna(0)
+    for f in FIELDS:
+        print(f"  {f}: census {census[f].sum():.0f} -> grid {cells[f].sum():.0f}")
     write_output(region, cells)
+
+
+def apartment_floors(buildings: gpd.GeoDataFrame) -> pd.DataFrame:
+    """Mean OSM-mapped floors of apartment-like buildings per cell, and how many were mapped."""
+    apt = buildings[buildings.apartment_like & buildings.osm_levels.notna()]
+    centre = apt.geometry.centroid
+    e, n = cell_index(centre.x.values, centre.y.values)
+    g = apt.osm_levels.groupby([e, n])
+    out = pd.DataFrame({"apt_floors": g.mean(), "apt_floors_n": g.size()})
+    out.index.names = ["e", "n"]
+    return out
 
 
 def write_output(region: str, cells: pd.DataFrame) -> None:
     to_wgs = Transformer.from_crs(CRS, 4326, always_xy=True)
     lon0, lat0 = to_wgs.transform(cells.e.min() * CELL, cells.n.min() * CELL)
     lon1, lat1 = to_wgs.transform((cells.e.max() + 1) * CELL, (cells.n.max() + 1) * CELL)
+    r1 = lambda s: np.round(s.to_numpy(), 1).tolist()
 
     # Written as a script rather than JSON so index.html can load it from file://.
     out = ROOT / "data" / f"{region}.js"
@@ -170,15 +286,22 @@ def write_output(region: str, cells: pd.DataFrame) -> None:
         "region": REGIONS[region]["name"],
         "crs": f"EPSG:{CRS}",
         "cell": CELL,
-        "typical_error": TYPICAL_ERROR.get(CELL),
+        "errors": ERRORS.get(CELL, {}),
         "bounds": [lon0, lat0, lon1, lat1],
         "count": len(cells),
         "columns": {
             "e": cells.e.astype(int).tolist(),
             "n": cells.n.astype(int).tolist(),
-            "pop": np.round(cells["pop"].to_numpy()).astype(int).tolist(),
+            **{f: np.round(cells[f].to_numpy()).astype(int).tolist() for f in AREA_FIELDS},
+            "res_bldg": r1(cells.res_bldg),
+            "houses": r1(cells.houses),
+            "apt_bldg": r1(cells.apt_bldg),
+            "low_rise": r1(cells.low_rise),
+            "mid_rise": r1(cells.mid_rise),
+            "apt_floors": r1(cells.apt_floors),
+            "apt_floors_n": cells.apt_floors_n.astype(int).tolist(),
         },
-    }, separators=(",", ":")) + ";\n")
+    }, ensure_ascii=False, separators=(",", ":")) + ";\n")
     print(f"wrote {len(cells)} cells, {cells['pop'].sum():.0f} residents -> {out} ({out.stat().st_size / 1e6:.2f} MB)")
 
 

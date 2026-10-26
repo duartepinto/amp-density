@@ -25,7 +25,18 @@ SERVICES = [
 PAGE_SIZE = 2000
 ROOT = Path(__file__).resolve().parent.parent
 
-FIELDS = ["BGRI2021", "DTMN21", "N_INDIVIDUOS"]
+FIELDS = [
+    "BGRI2021",
+    "DTMN21",
+    "N_INDIVIDUOS",
+    "N_ALOJAMENTOS_TOTAL",             # dwellings
+    "N_AGREGADOS_DOMESTICOS_PRIVADO",  # private households
+    "N_EDIFICIOS_CLASSICOS",           # buildings with at least one dwelling
+    "N_EDIFICIOS_CLASS_CONST_1_OU_2",  # built for 1-2 dwellings -> single-family
+    "N_EDIFICIOS_CLASS_CONST_3_OU_M",  # built for 3+ dwellings -> apartment buildings
+    "N_EDIFICIOS_1_OU_2_PISOS",        # buildings with 1-2 floors
+    "N_EDIFICIOS_3_OU_MAIS_PISOS",     # buildings with 3+ floors
+]
 
 
 def fetch_page(service: str, where: str, offset: int) -> dict:

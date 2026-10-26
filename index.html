@@ -12,6 +12,12 @@
       --ink-2: #4b4b47;
       --muted: #76756f;
       --line: #e4e3df;
+      --track: #f0efec;
+      --houses: #e87ba4;
+      --apts: #2a78d6;
+      --low: #9085e9;
+      --tall: #4a3aa7;
+      --highlight: #1a1a19;
       color-scheme: light;
     }
     @media (prefers-color-scheme: dark) {
@@ -21,6 +27,12 @@
         --ink-2: #c9c8c3;
         --muted: #9a9993;
         --line: #3a3a37;
+        --track: #383835;
+        --houses: #d55181;
+        --apts: #3987e5;
+        --low: #5b4dbf;
+        --tall: #b3aaf2;
+        --highlight: #f2f1ee;
         color-scheme: dark;
       }
     }
@@ -30,6 +42,12 @@
       --ink-2: #c9c8c3;
       --muted: #9a9993;
       --line: #3a3a37;
+      --track: #383835;
+      --houses: #d55181;
+      --apts: #3987e5;
+      --low: #5b4dbf;
+      --tall: #b3aaf2;
+      --highlight: #f2f1ee;
       color-scheme: dark;
     }
 
@@ -69,7 +87,7 @@
     }
     #legend .sw:first-child span { transform: none; left: 0; }
 
-    #panel { top: 12px; right: 12px; width: 300px; max-height: calc(100% - 24px); overflow-y: auto; }
+    #panel { top: 12px; right: 12px; width: 340px; max-height: calc(100% - 24px); overflow-y: auto; }
     #close {
       position: absolute; top: 6px; right: 8px; border: 0; background: none;
       font-size: 22px; line-height: 1; color: var(--muted); cursor: pointer; padding: 4px;
@@ -80,6 +98,15 @@
     .rows dt { color: var(--ink-2); }
     .rows dd { margin: 0; text-align: right; font-weight: 550; }
     .note { font-size: 12px; color: var(--muted); margin: 10px 0 0; }
+    #panel h2 { font-size: 13px; font-weight: 600; margin: 18px 0 0; color: var(--ink-2); }
+
+    /* Two-part split bars: single-family vs apartments, 1-2 vs 3+ floors */
+    .split { display: flex; gap: 2px; height: 10px; margin: 8px 0 6px; }
+    .split div { border-radius: 4px; min-width: 4px; }
+    .split .none { background: var(--track); flex: 1; }
+    .floors { font-size: 22px; font-weight: 650; font-variant-numeric: tabular-nums; margin-top: 6px; }
+    .key { display: flex; justify-content: space-between; gap: 8px; font-size: 12px; color: var(--ink-2); }
+    .key i { display: inline-block; width: 8px; height: 8px; border-radius: 2px; margin-right: 5px; }
 
     @media (max-width: 640px) {
       #title { right: 12px; width: auto; }
@@ -160,6 +187,27 @@
     const fmtInt = new Intl.NumberFormat("en-GB", { maximumFractionDigits: 0 });
     const fmt1 = new Intl.NumberFormat("en-GB", { maximumFractionDigits: 1 });
 
+    // Allocated census counts are fractional; show "<1" instead of a misleading zero.
+    function count(v) {
+      if (v <= 0) return "0";
+      if (v < 0.5) return "<1";
+      return fmtInt.format(v);
+    }
+
+    function pct(part, total) {
+      return total > 0 ? `${Math.round((100 * part) / total)}%` : "–";
+    }
+
+    // Two-part bar plus its key. Each part: [label, value, CSS colour variable].
+    function splitBar(a, b) {
+      const total = a[1] + b[1];
+      const seg = ([, v, colour]) => (v > 0 ? `<div style="flex:${v};background:var(${colour})"></div>` : "");
+      const key = ([label, v, colour]) =>
+        `<span><i style="background:var(${colour})"></i>${label} · ${count(v)} (${pct(v, total)})</span>`;
+      return `<div class="split">${total > 0 ? seg(a) + seg(b) : `<div class="none"></div>`}</div>
+        <div class="key">${key(a)}${key(b)}</div>`;
+    }
+
     function compact(v) {
       return v >= 1000 ? `${fmt1.format(v / 1000)}k` : fmtInt.format(v);
     }
@@ -202,9 +250,6 @@
       // footprints, which the basemap draws above roads and would otherwise hide the
       // colour. The selection outline sits above everything but the labels.
       const layers = map.getStyle().layers;
-      // CARTO names these "roads"/"buildings"; OpenMapTiles styles "transportation"/"building".
-      const isRoad = (l) => ["roads", "transportation"].includes(l["source-layer"]);
-      const isBuilding = (l) => ["buildings", "building"].includes(l["source-layer"]);
       const roadsStart = layers.find(isRoad)?.id;
       const labelsStart = layers[layers.findLastIndex((l) => l.type !== "symbol") + 1]?.id;
       map.addLayer(
@@ -235,7 +280,72 @@
       for (const l of layers) {
         if (isBuilding(l)) map.moveLayer(l.id, "cells-fill");
       }
-      if (selected !== null) map.setFeatureState({ source: "cells", id: selected }, { selected: true });
+      // Buildings of the selected cell, drawn over the cells but still under the streets.
+      const ink = getComputedStyle(document.documentElement).getPropertyValue("--highlight").trim();
+      map.addSource("selected-buildings", { type: "geojson", data: EMPTY });
+      map.addLayer(
+        { id: "selected-buildings", type: "fill", source: "selected-buildings", paint: { "fill-color": ink, "fill-opacity": 0.55 } },
+        roadsStart
+      );
+      if (selected !== null) {
+        map.setFeatureState({ source: "cells", id: selected }, { selected: true });
+        highlightBuildings();
+      }
+    }
+
+    // CARTO names these "roads"/"buildings"; OpenMapTiles styles "transportation"/"building".
+    const isRoad = (l) => ["roads", "transportation"].includes(l["source-layer"]);
+    const isBuilding = (l) => ["buildings", "building"].includes(l["source-layer"]);
+    const EMPTY = { type: "FeatureCollection", features: [] };
+    const BUILDINGS_MINZOOM = 13; // the basemap only carries building shapes from here
+
+    // Copies the basemap's building shapes whose centre falls inside the selected cell
+    // into the highlight layer. Re-run on "idle" so it follows zooming and panning.
+    function highlightBuildings() {
+      const target = map.getSource("selected-buildings");
+      if (!target) return;
+      const layer = map.getStyle().layers.find(isBuilding);
+      if (selected === null || !layer || map.getZoom() < BUILDINGS_MINZOOM) {
+        target.setData(EMPTY);
+        return;
+      }
+      const c = data.columns, size = data.cell;
+      const x0 = c.e[selected] * size, y0 = c.n[selected] * size;
+      const seen = new Set();
+      const features = [];
+      for (const f of map.querySourceFeatures(layer.source, { sourceLayer: layer["source-layer"] })) {
+        const polys = f.geometry.type === "Polygon" ? [f.geometry.coordinates]
+          : f.geometry.type === "MultiPolygon" ? f.geometry.coordinates : [];
+        for (const rings of polys) {
+          const outer = rings[0];
+          let lon = 0, lat = 0;
+          for (const [x, y] of outer) { lon += x; lat += y; }
+          const [x, y] = toLonLat.inverse([lon / outer.length, lat / outer.length]);
+          if (x < x0 || x >= x0 + size || y < y0 || y >= y0 + size) continue;
+          // Tiles overlap at their edges, so the same shape can come back twice.
+          const key = outer.slice(0, 3).flat().map((v) => v.toFixed(6)).join();
+          if (seen.has(key)) continue;
+          seen.add(key);
+          features.push({ type: "Feature", properties: {}, geometry: { type: "Polygon", coordinates: rings } });
+        }
+      }
+      target.setData({ type: "FeatureCollection", features });
+    }
+
+    function floorsBlock(c, i) {
+      const n = c.apt_floors_n[i];
+      if (!n) {
+        return `<p class="note"><b>Average apartment building height:</b> not mapped in OpenStreetMap for this cell.</p>`;
+      }
+      return `<div class="floors">${fmt1.format(c.apt_floors[i])} floors</div>
+        <p class="note" style="margin-top:2px">Average apartment building height, from ${n} building${n > 1 ? "s" : ""}
+        with floors mapped in OpenStreetMap.</p>`;
+    }
+
+    function buildingHint() {
+      return map.getZoom() < BUILDINGS_MINZOOM
+        ? "Zoom in to see this cell's buildings highlighted."
+        : "This cell's buildings are highlighted (map shapes from OpenStreetMap).";
     }
 
     function showCell(i) {
@@ -243,17 +353,37 @@
       const density = c.pop[i] / cellKm2();
       const [lon, lat] = toLonLat.forward([(c.e[i] + 0.5) * data.cell, (c.n[i] + 0.5) * data.cell]);
       const view = `${lat.toFixed(5)}/${lon.toFixed(5)}`;
+      const err = data.errors || {};
 
       document.getElementById("panel-body").innerHTML = `
         <div class="hero">${fmtInt.format(density)} <small>residents / km²</small></div>
         <dl class="rows">
-          <dt>Residents in this cell</dt><dd>${fmtInt.format(c.pop[i])}</dd>
+          <dt>Residents</dt><dd>${fmtInt.format(c.pop[i])}</dd>
+          <dt>Dwellings</dt><dd>${fmtInt.format(c.dwellings[i])}</dd>
+          <dt>Households</dt><dd>${fmtInt.format(c.households[i])}</dd>
+          <dt>Average household size</dt><dd>${c.households[i] > 0 ? fmt1.format(c.pop[i] / c.households[i]) : "–"}</dd>
           <dt>Cell size</dt><dd>${data.cell} m × ${data.cell} m</dd>
         </dl>
         <p class="note">
-          Census 2021 residents, spread from census blocks onto the grid using building
-          footprints.${data.typical_error ? ` Typical error per cell is about ±${data.typical_error}.` : ""}
+          Census 2021, spread from census blocks onto the grid using building footprints.
+          ${err.pop ? `Typical error per cell: counts ±${err.pop}${err.hh_size ? `, household size ±${err.hh_size}` : ""}.` : ""}
         </p>
+
+        <h2>Residential buildings</h2>
+        <dl class="rows">
+          <dt>Buildings with dwellings</dt><dd>${count(c.res_bldg[i])}</dd>
+        </dl>
+        ${splitBar(["Single-family", c.houses[i], "--houses"], ["Apartments", c.apt_bldg[i], "--apts"])}
+        <p class="note">
+          Single-family = built for 1–2 dwellings; apartment building = built for 3 or more (INE).
+          ${err.res_bldg ? `Typical error: count ±${err.res_bldg}, apartment share ±${err.apt_share}.` : ""}
+        </p>
+
+        <h2>Floors</h2>
+        ${splitBar(["1–2 floors", c.low_rise[i], "--low"], ["3 or more", c.mid_rise[i], "--tall"])}
+        <p class="note">Residential buildings by number of floors (INE).${err.rise_share ? ` Typical error on the share: ±${err.rise_share}.` : ""}</p>
+        ${floorsBlock(c, i)}
+        <p class="note" id="building-hint">${buildingHint()}</p>
         <p class="note">
           Cell ${c.e[i]}E ${c.n[i]}N (EPSG:3035) ·
           <a href="https://www.openstreetmap.org/?mlat=${lat.toFixed(5)}&mlon=${lon.toFixed(5)}#map=15/${view}" target="_blank" rel="noopener">OSM</a> ·
@@ -268,10 +398,12 @@
       selected = i;
       if (i === null) {
         document.getElementById("panel").hidden = true;
+        highlightBuildings();
         return;
       }
       map.setFeatureState({ source: "cells", id: i }, { selected: true });
       showCell(i);
+      highlightBuildings();
     }
 
     let hovered = null;
@@ -300,8 +432,21 @@
       styleReady = false;
       map.setStyle(BASEMAP[theme()], { diff: false }); // diffing would skip "style.load"
     });
+    // Updating the highlight re-renders and fires "idle" again, so only redo it when
+    // the selection or the view actually changed.
+    let highlightedView = "";
+    map.on("idle", () => {
+      if (selected === null) return;
+      const view = `${selected}|${map.getZoom().toFixed(2)}|${map.getCenter().toArray()}`;
+      if (view === highlightedView) return;
+      highlightedView = view;
+      highlightBuildings();
+      const hint = document.getElementById("building-hint");
+      if (hint) hint.textContent = buildingHint();
+    });
     map.on("style.load", () => {
       styleReady = true;
+      highlightedView = ""; // a new basemap means new building tiles: redo the highlight
       addLayers();
     });
 
