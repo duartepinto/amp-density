@@ -7,7 +7,8 @@ apartment buildings and into 1–2 vs 3+ floors, and the average floors of its a
 where OpenStreetMap maps them. When zoomed in (z13+), the cell's buildings are highlighted on the map.
 
 The metro lines and stations are drawn on top; click a station to see the area within a 10-minute
-walk of it and how many residents live there.
+walk of it, how many residents live there, and how often trains call (minutes between trains per
+line at weekday peak, midday and evening and at weekends).
 
 **Open `index.html`** — a static page that works straight from disk or any static host.
 It loads the grid from `data/amp.js` (a script, so no server is needed); map tiles and the
@@ -21,6 +22,7 @@ MapLibre/proj4 libraries come from CDNs. To publish, upload `index.html` and `da
 | Residents, dwellings, households and residential buildings per statistical subsection (Census 2021, BGRI 2021) | [INE](https://gisserver.ine.pt/arcgis/rest/services/BGRI2021/BGRI/FeatureServer/0), falls back to an ArcGIS Online republication | the counts |
 | Building footprints + tags | OpenStreetMap ([Geofabrik](https://download.geofabrik.de/europe/portugal.html)) | placing residents inside each census subsection |
 | ML building footprints | [Overture Maps](https://overturemaps.org) (Microsoft, Esri) | filling OSM gaps outside the big cities |
+| Metro timetables (GTFS) | [Metro do Porto](https://www.metrodoporto.pt/pages/337) | train frequencies at each station |
 | Net building height, population (100 m) | [GHSL](https://human-settlement.emergency.copernicus.eu) GHS-BUILT-H ANBH 2018, GHS-POP 2020 | floors where OSM has none; fallback for subsections with no buildings |
 
 ## How the numbers are made, and how accurate they are
@@ -67,10 +69,16 @@ interiors) are filled. Residents come from the grid, counting the share of each 
 area, so they carry the grid's error. There is no time for stairs, slopes or waiting at crossings,
 so in steep parts of Porto 10 minutes is generous.
 
+Frequencies are counted from Metro do Porto's GTFS timetables: trains calling at each station per
+hour, averaged over the two directions, on weekdays at peak (7:30–9:30), midday (11–16) and evening
+(21–24), and on Saturdays and Sundays (10–19), shown as minutes between trains. Holiday-only services
+are left out. GTFS stops are matched to stations by location, since a few names are spelled
+differently.
+
 ## Rebuild
 
 ```sh
-mkdir -p data/raw/osm data/raw/ghsl
+mkdir -p data/raw/osm data/raw/ghsl data/raw/gtfs
 curl -L -o data/raw/osm/portugal-latest.osm.pbf https://download.geofabrik.de/europe/portugal-latest.osm.pbf
 # GHSL tile R5_C18 (covers mainland Portugal's west coast), unzip into data/raw/ghsl/:
 #   GHS_BUILT_H_ANBH_E2018_GLOBE_R2023A_54009_100_V1_0_R5_C18.zip
@@ -81,6 +89,8 @@ uv run python pipeline/fetch_census.py amp
 uv run python pipeline/extract_osm.py amp
 uv run python pipeline/fetch_overture.py amp
 uv run python pipeline/build_grid.py amp     # -> data/amp.js
+# Metro do Porto timetables ("GTFS Horários" on https://www.metrodoporto.pt/pages/337):
+curl -L -o data/raw/gtfs/amp_metro.zip https://www.metrodoporto.pt/metrodoporto/uploads/document/file/794/google_transit_04_09_2026.zip
 uv run python pipeline/build_metro.py amp    # -> data/amp_metro.js (needs data/amp.js)
 
 # Not used by the grid yet: DGT LiDAR surface/terrain tiles for building heights

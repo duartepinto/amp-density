@@ -119,6 +119,14 @@
     }
     /* Lines under construction: dashed outline badge, like their dashed track */
     .badge.planned { background: var(--surface); color: var(--ink); border: 2px dashed; }
+    /* Train frequency table: minutes between trains per line, by period */
+    .freq { width: 100%; border-collapse: collapse; margin-top: 8px; font-size: 12px; font-variant-numeric: tabular-nums; }
+    .freq th, .freq td { padding: 3px 0; text-align: right; font-weight: 400; }
+    .freq thead th { color: var(--muted); font-weight: 500; }
+    .freq tbody th { text-align: left; width: 48px; }
+    .freq tr.all > * { border-top: 1px solid var(--line); padding-top: 6px; font-weight: 600; }
+    .trains-total { margin: 6px 0 0; color: var(--ink-2); }
+    .trains-total b { font-size: 18px; color: var(--ink); font-variant-numeric: tabular-nums; }
     .line-list { list-style: none; padding: 0; margin: 10px 0 0; display: grid; gap: 4px; font-size: 12px; color: var(--ink-2); }
     .line-list li { display: flex; gap: 8px; align-items: center; }
     .tip .maplibregl-popup-content {
@@ -443,11 +451,45 @@
 
     // Badge text: dark on light line colours (Line D yellow), white otherwise.
     function badge(ref) {
-      const line = metro.lines.find((l) => l.ref === ref);
+      // Service variants (Bx, the B express) take their line's colour.
+      const line = metro.lines.find((l) => l.ref === ref) ?? metro.lines.find((l) => ref.startsWith(l.ref));
       if (line.planned) return `<span class="badge planned" style="border-color:${line.colour}">${ref}</span>`;
       const [r, g, b] = [1, 3, 5].map((k) => parseInt(line.colour.slice(k, k + 2), 16) / 255);
       const light = 0.2126 * r + 0.7152 * g + 0.0722 * b > 0.55;
       return `<span class="badge" style="background:${line.colour};color:${light ? "#1a1a19" : "#ffffff"}">${ref}</span>`;
+    }
+
+    // Minutes between trains in each direction, per line and for all lines together,
+    // from the trains per hour counted in the timetable.
+    function trainsBlock(s) {
+      const t = metro.timetable;
+      if (!t || !s.freq?.all) return "";
+      const wait = (tph) => {
+        if (!(tph > 0)) return "–";
+        const m = 60 / tph;
+        return m < 5 ? fmt1.format(m) : fmtInt.format(m);
+      };
+      const DAYS = { monday: "Weekdays", saturday: "Saturdays", sunday: "Sundays and holidays" };
+      const head = t.periods.map((p) => `<th title="${DAYS[p.day]} ${p.hours}">${p.label}</th>`).join("");
+      const refs = Object.keys(s.freq).filter((r) => r !== "all").sort();
+      const row = (label, values, cls = "") => `<tr class="${cls}"><th>${label}</th>${values.map((v) => `<td>${wait(v)}</td>`).join("")}</tr>`;
+      const weekday = t.periods.filter((p) => p.day === "monday").map((p) => `${p.label.toLowerCase()} ${p.hours}`).join(", ");
+      const weekend = [...new Set(t.periods.filter((p) => p.day !== "monday").map((p) => p.hours))].join(", ");
+      const date = (d) => new Date(d).toLocaleDateString("en-GB", { day: "numeric", month: "short", year: "numeric" });
+      return `
+        <h2>Trains</h2>
+        <p class="trains-total"><b>${fmtInt.format(s.freq.all[0])}</b> trains an hour stop here at weekday peak, both directions</p>
+        <table class="freq">
+          <thead><tr><th></th>${head}</tr></thead>
+          <tbody>
+            ${refs.map((r) => row(badge(r), s.freq[r])).join("")}
+            ${refs.length > 1 ? row("All", s.freq.all.map((v) => v / 2), "all") : ""}
+          </tbody>
+        </table>
+        <p class="note">
+          Minutes between trains in each direction. Weekdays: ${weekday}; weekends ${weekend}.
+          From Metro do Porto's timetable for ${date(t.from)} – ${date(t.to)}.
+        </p>`;
     }
 
     function showStation(i) {
@@ -472,12 +514,14 @@
           <dt>Walking area</dt><dd>${fmt1.format(s.km2)} km²</dd>
           <dt>Density in that area</dt><dd>${s.km2 > 0 ? fmtInt.format(s.pop / s.km2) : "–"} / km²</dd>
         </dl>
-        <ul class="line-list">${lines}</ul>
         <p class="note">
           The area reached on foot in ${w.minutes} minutes at ${fmt1.format(w.kmh)} km/h (${fmtInt.format(w.metres)} m)
           along streets, footpaths and stairs mapped in OpenStreetMap, from the station's platforms.
           Residents are the census grid's, counting the share of each cell inside the area.
         </p>
+        <h2>Lines</h2>
+        <ul class="line-list">${lines}</ul>
+        ${trainsBlock(s)}
       `;
       document.getElementById("panel").hidden = false;
     }

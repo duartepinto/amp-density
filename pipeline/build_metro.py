@@ -13,17 +13,24 @@ from the street centre line) and small enclosed gaps such as block interiors are
 filled. Residents inside are summed from the grid in data/<region>.js, weighted by
 the share of each cell that falls inside.
 
-Input:  data/raw/osm/portugal-latest.osm.pbf, data/<region>.js (run build_grid.py first)
+Frequencies: trains per hour by period, counted from the operator's GTFS timetables
+(data/raw/gtfs/<region>_metro.zip, optional) at each station, matched by location.
+
+Input:  data/raw/osm/portugal-latest.osm.pbf, data/<region>.js (run build_grid.py first),
+        data/raw/gtfs/<region>_metro.zip
 Output: data/<region>_metro.js
 
 Usage: uv run python pipeline/build_metro.py amp
 """
 
+import csv
 import heapq
+import io
 import json
-from collections import Counter
 import math
 import sys
+import zipfile
+from collections import Counter
 from collections import defaultdict
 from pathlib import Path
 
@@ -46,6 +53,15 @@ FILL_HOLES_M2 = 100_000  # enclosed gaps smaller than 10 ha count as reached
 SNAP_M = 80  # streets this close to a stop are where the walk starts
 SIMPLIFY_M = 5
 METRIC_CRS, GRID_CRS = 3763, 3035
+# Timetable periods: (short label, calendar.txt day column, start, end in hours)
+PERIODS = [
+    ("Peak", "monday", 7.5, 9.5),
+    ("Midday", "monday", 11, 16),
+    ("Evening", "monday", 21, 24),
+    ("Sat", "saturday", 10, 19),
+    ("Sun", "sunday", 10, 19),
+]
+GTFS_MATCH_M = 300  # a GTFS stop belongs to the station within this distance
 NOT_WALKABLE = {"motorway", "motorway_link", "construction", "proposed", "raceway", "bus_guideway", "abandoned"}
 
 to_metric = Transformer.from_crs(4326, METRIC_CRS, always_xy=True)
@@ -270,6 +286,57 @@ def planned_lines(building: list, cfg: dict) -> tuple[list[dict], dict[str, list
     return lines, track
 
 
+def frequencies(path: Path, stations: list[dict]) -> tuple[list[dict], dict]:
+    """Trains per hour at each station in each period: per line and direction (the mean
+    of the two directions), and all lines in both directions together.
+
+    Returns one {line ref: [per period], "all": [per period]} per station (empty for
+    stations not in the timetable) and the feed's validity.
+    """
+    z = zipfile.ZipFile(path)
+    read = lambda name: csv.DictReader(io.StringIO(z.read(name).decode("utf-8-sig")))
+    routes = {r["route_id"]: r["route_short_name"] for r in read("routes.txt")}
+    calendar = list(read("calendar.txt"))
+    runs_on = {c["service_id"]: c for c in calendar}
+    trips = {t["trip_id"]: (routes[t["route_id"]], runs_on.get(t["service_id"]), t["direction_id"])
+             for t in read("trips.txt")}
+
+    open_ = [i for i, s in enumerate(stations) if s["lines"]]
+    tree = shapely.STRtree(shapely.points([to_metric.transform(stations[i]["lon"], stations[i]["lat"]) for i in open_]))
+    station_of = {}
+    for stop in read("stops.txt"):
+        p = shapely.Point(to_metric.transform(float(stop["stop_lon"]), float(stop["stop_lat"])))
+        k = tree.query_nearest(p, max_distance=GTFS_MATCH_M)
+        if len(k):
+            station_of[stop["stop_id"]] = open_[int(k[0])]
+        else:
+            print(f"  GTFS stop {stop['stop_name']} matches no station")
+
+    counts = defaultdict(Counter)  # station -> (line, direction, period) -> trains
+    for st in read("stop_times.txt"):
+        route, service, direction = trips[st["trip_id"]]
+        station = station_of.get(st["stop_id"])
+        if service is None or station is None:
+            continue  # holiday-only services (calendar_dates.txt) are left out
+        h, m, *_ = (int(v) for v in st["departure_time"].split(":"))
+        t = h + m / 60
+        for k, (_, day, start, end) in enumerate(PERIODS):
+            if service[day] == "1" and start <= t < end:
+                counts[station][route, direction, k] += 1
+
+    hours = [end - start for _, _, start, end in PERIODS]
+    out = [{} for _ in stations]
+    for station, c in counts.items():
+        for route in sorted({r for r, _, _ in c}):
+            out[station][route] = [round(sum(c[route, d, k] for d in ("0", "1")) / 2 / hours[k], 1)
+                                   for k in range(len(PERIODS))]
+        out[station]["all"] = [round(sum(n for (_, _, kk), n in c.items() if kk == k) / hours[k], 1)
+                               for k in range(len(PERIODS))]
+    fmt = lambda d: f"{d[:4]}-{d[4:6]}-{d[6:]}"
+    valid = {"from": fmt(min(c["start_date"] for c in calendar)), "to": fmt(max(c["end_date"] for c in calendar))}
+    return out, valid
+
+
 def read_grid(region: str):
     text = (ROOT / "data" / f"{region}.js").read_text()
     grid = json.loads(text.split("=", 1)[1].rstrip().rstrip(";"))
@@ -399,6 +466,20 @@ def main(region: str) -> None:
             "km2": round(area.area / 1e6, 2),
             "walk": lonlat_rings(area),
         })
+    gtfs = ROOT / "data/raw/gtfs" / f"{region}_metro.zip"
+    timetable = None
+    if gtfs.exists():
+        freq, valid = frequencies(gtfs, stations)
+        for s, f in zip(stations, freq):
+            s["freq"] = f
+        hm = lambda h: f"{int(h)}:{round(h % 1 * 60):02d}"
+        timetable = {"periods": [{"label": label, "day": day, "hours": f"{hm(a)}–{hm(b)}"} for label, day, a, b in PERIODS],
+                     **valid}
+        busiest = max(stations, key=lambda s: s["freq"].get("all", [0])[0])
+        print(f"timetable {valid['from']} to {valid['to']}: busiest at weekday peak is "
+              f"{busiest['name']}, {busiest['freq']['all'][0]} trains/h")
+    else:
+        print(f"no {gtfs.relative_to(ROOT)}: frequencies left out")
     covered = residents(shapely.union_all([a for a, open_ in areas if open_]), cells, pop, tree)
     covered_all = residents(shapely.union_all([a for a, _ in areas]), cells, pop, tree)
 
@@ -408,6 +489,7 @@ def main(region: str) -> None:
         "walk": {"minutes": WALK_MINUTES, "kmh": WALK_KMH, "metres": round(WALK_M)},
         "covered_pop": round(covered),
         "covered_pop_planned": round(covered_all),
+        "timetable": timetable,
         "total_pop": round(pop.sum()),
         "lines": lines,
         "tracks": {"type": "FeatureCollection", "features": tracks_geojson},
