@@ -108,6 +108,25 @@
     .key { display: flex; justify-content: space-between; gap: 8px; font-size: 12px; color: var(--ink-2); }
     .key i { display: inline-block; width: 8px; height: 8px; border-radius: 2px; margin-right: 5px; }
 
+    /* Metro: toggle in the title card, line badges, station hover tooltip */
+    #metro-toggle { display: flex; gap: 6px; align-items: baseline; margin-top: 8px; font-size: 12px; color: var(--ink-2); cursor: pointer; }
+    #metro-toggle[hidden] { display: none; }
+    #metro-toggle input { margin: 0; accent-color: var(--ink); }
+    .station-name { font-size: 20px; font-weight: 650; margin: 0 24px 8px 0; }
+    .badge {
+      display: inline-flex; align-items: center; justify-content: center; min-width: 20px; height: 20px;
+      padding: 0 5px; border-radius: 10px; font-size: 12px; font-weight: 700;
+    }
+    /* Lines under construction: dashed outline badge, like their dashed track */
+    .badge.planned { background: var(--surface); color: var(--ink); border: 2px dashed; }
+    .line-list { list-style: none; padding: 0; margin: 10px 0 0; display: grid; gap: 4px; font-size: 12px; color: var(--ink-2); }
+    .line-list li { display: flex; gap: 8px; align-items: center; }
+    .tip .maplibregl-popup-content {
+      background: var(--surface); color: var(--ink); padding: 4px 8px; border-radius: 6px;
+      font: 12px/1.3 system-ui, -apple-system, "Segoe UI", sans-serif; box-shadow: 0 1px 6px rgb(0 0 0 / 0.2);
+    }
+    .tip .maplibregl-popup-tip { display: none; }
+
     @media (max-width: 640px) {
       #title { right: 12px; width: auto; }
       #panel { top: auto; bottom: 0; right: 0; left: 0; width: auto; max-height: 55%; border-radius: 12px 12px 0 0; }
@@ -124,6 +143,7 @@
     <p class="muted" id="subtitle">Residents per km² · Census 2021</p>
     <div id="legend"></div>
     <p class="muted small" id="status">Loading grid…</p>
+    <label id="metro-toggle" hidden><input type="checkbox" checked> <span id="metro-summary">Metro</span></label>
   </header>
 
   <aside class="card" id="panel" hidden>
@@ -135,7 +155,8 @@
     Census: <a href="https://censos.ine.pt">INE Censos 2021 (BGRI)</a> ·
     placed using buildings from <a href="https://www.openstreetmap.org/copyright">© OpenStreetMap</a>,
     <a href="https://overturemaps.org">Overture Maps</a> and
-    <a href="https://human-settlement.emergency.copernicus.eu">GHSL</a>
+    <a href="https://human-settlement.emergency.copernicus.eu">GHSL</a> ·
+    metro and walking paths from OpenStreetMap
   </footer>
 
   <script src="https://unpkg.com/maplibre-gl@4.7.1/dist/maplibre-gl.js"></script>
@@ -169,7 +190,9 @@
     };
 
     let data; // { columns: { e, n, pop }, count, cell, bounds, region }
+    let metro = null; // data/<region>_metro.js (pipeline/build_metro.py), when built
     let selected = null;
+    let station = null; // index into metro.stations
     // isStyleLoaded() is false while tiles load, so track "style.load" ourselves.
     let styleReady = false;
     const startedWithView = Boolean(location.hash); // MapLibre writes the hash on load
@@ -332,6 +355,153 @@
       target.setData({ type: "FeatureCollection", features });
     }
 
+    // Metro lines, stations and the selected station's walking area. Lines sharing
+    // track are drawn side by side: each track piece carries its slot `k` across the bundle.
+    // Lines under construction are dashed, and stations not yet open are grey.
+    const METRO_LAYERS = ["metro-casing", "metro-lines", "metro-planned", "stations", "station-labels"];
+    const PLANNED = ["boolean", ["get", "planned"], false];
+    const byZoom = (z9, z13, z16) => ["interpolate", ["linear"], ["zoom"], 9, z9, 13, z13, 16, z16];
+    const LINE_W = [2, 3, 5];
+
+    function addMetroLayers() {
+      if (!metro || !styleReady || map.getSource("metro")) return;
+      const css = getComputedStyle(document.documentElement);
+      const surface = css.getPropertyValue("--surface").trim();
+      const ink = css.getPropertyValue("--ink").trim();
+      const muted = css.getPropertyValue("--muted").trim();
+      const layers = map.getStyle().layers;
+      const labelsStart = layers[layers.findLastIndex((l) => l.type !== "symbol") + 1]?.id;
+      const visibility = document.querySelector("#metro-toggle input").checked ? "visible" : "none";
+
+      // Walking area: everything outside it is faded, and it gets an outline.
+      map.addSource("walk", { type: "geojson", data: EMPTY });
+      map.addLayer({ id: "walk-mask", type: "fill", source: "walk", filter: ["==", ["get", "part"], "mask"],
+        paint: { "fill-color": surface, "fill-opacity": 0.65 } }, labelsStart);
+      map.addLayer({ id: "walk-line", type: "line", source: "walk", filter: ["==", ["get", "part"], "area"],
+        paint: { "line-color": ink, "line-width": 2 } }, labelsStart);
+
+      map.addSource("metro", { type: "geojson", data: metro.tracks });
+      const offset = byZoom(...LINE_W.map((w) => ["*", ["get", "k"], w]));
+      const round = { "line-cap": "round", "line-join": "round", visibility };
+      map.addLayer({ id: "metro-casing", type: "line", source: "metro", layout: round,
+        paint: { "line-color": surface, "line-width": byZoom(...LINE_W.map((w) => w + 2)), "line-offset": offset } }, labelsStart);
+      map.addLayer({ id: "metro-lines", type: "line", source: "metro", layout: round, filter: ["!", PLANNED],
+        paint: { "line-color": ["get", "c"], "line-width": byZoom(...LINE_W), "line-offset": offset } }, labelsStart);
+      map.addLayer({ id: "metro-planned", type: "line", source: "metro", layout: { ...round, "line-cap": "butt" }, filter: PLANNED,
+        paint: { "line-color": ["get", "c"], "line-width": byZoom(...LINE_W), "line-dasharray": [2, 1.2] } }, labelsStart);
+
+      map.addSource("stations", {
+        type: "geojson",
+        data: {
+          type: "FeatureCollection",
+          features: metro.stations.map((s, i) => ({
+            type: "Feature", id: i,
+            properties: { name: s.name, hub: s.lines.length + s.planned.length > 1, future: s.lines.length === 0 },
+            geometry: { type: "Point", coordinates: [s.lon, s.lat] },
+          })),
+        },
+      });
+      const on = ["boolean", ["feature-state", "selected"], false];
+      map.addLayer({ id: "stations", type: "circle", source: "stations", layout: { visibility },
+        paint: {
+          "circle-radius": byZoom(["case", ["get", "hub"], 2.2, 1.5], ["case", ["get", "hub"], 6, 4.5], ["case", ["get", "hub"], 9, 7]),
+          "circle-color": ["case", on, ink, surface],
+          "circle-stroke-color": ["case", ["get", "future"], muted, ink],
+          "circle-stroke-width": byZoom(0.8, 1.8, 2.5),
+        } }, labelsStart);
+      map.addLayer({ id: "station-labels", type: "symbol", source: "stations", minzoom: 13,
+        layout: {
+          visibility,
+          "text-field": ["get", "name"],
+          "text-font": ["Montserrat Medium", "Open Sans Regular", "Noto Sans Regular"],
+          "text-size": 12,
+          "text-anchor": "left",
+          "text-offset": [0.9, 0],
+          "text-optional": true,
+        },
+        paint: { "text-color": ["case", ["get", "future"], muted, ink], "text-halo-color": surface, "text-halo-width": 1.5 } });
+      if (station !== null) showWalk(station);
+    }
+
+    function showWalk(i) {
+      map.setFeatureState({ source: "stations", id: i }, { selected: true });
+      const walk = metro.stations[i].walk;
+      // Mask = the world with the walking area cut out. Ring winding tells MapLibre
+      // which rings are holes: the area's outer rings are reversed to become holes,
+      // and its own holes are reversed to become islands of mask.
+      const world = [[-180, -85], [180, -85], [180, 85], [-180, 85], [-180, -85]];
+      const rev = (ring) => ring.slice().reverse();
+      const mask = [[world, ...walk.map((p) => rev(p[0]))], ...walk.flatMap((p) => p.slice(1).map((h) => [rev(h)]))];
+      map.getSource("walk").setData({
+        type: "FeatureCollection",
+        features: [
+          { type: "Feature", properties: { part: "mask" }, geometry: { type: "MultiPolygon", coordinates: mask } },
+          { type: "Feature", properties: { part: "area" }, geometry: { type: "MultiPolygon", coordinates: walk } },
+        ],
+      });
+    }
+
+    // Badge text: dark on light line colours (Line D yellow), white otherwise.
+    function badge(ref) {
+      const line = metro.lines.find((l) => l.ref === ref);
+      if (line.planned) return `<span class="badge planned" style="border-color:${line.colour}">${ref}</span>`;
+      const [r, g, b] = [1, 3, 5].map((k) => parseInt(line.colour.slice(k, k + 2), 16) / 255);
+      const light = 0.2126 * r + 0.7152 * g + 0.0722 * b > 0.55;
+      return `<span class="badge" style="background:${line.colour};color:${light ? "#1a1a19" : "#ffffff"}">${ref}</span>`;
+    }
+
+    function showStation(i) {
+      const s = metro.stations[i];
+      const w = metro.walk;
+      const lines = [...s.lines, ...s.planned].map((ref) => {
+        const line = metro.lines.find((l) => l.ref === ref);
+        const [, word, ends] = line.name.match(/^Linha (\S+):\s*(.*)$/) || [, "", line.name];
+        const label = line.planned
+          ? `${word} line, ${ends} · <i>under construction${line.opening ? `, opening ${line.opening}` : ""}</i>`
+          : ends;
+        return `<li>${badge(ref)} <span>${label}</span></li>`;
+      }).join("");
+      const future = s.lines.length === 0;
+      document.getElementById("panel-body").innerHTML = `
+        <div class="station-name">${s.name}</div>
+        ${future ? `<p class="note" style="margin:-4px 0 8px">Future station, not open yet.${s.approx
+          ? " Location approximate: OpenStreetMap does not map it yet, so it is placed on the line by its described location."
+          : ""}</p>` : ""}
+        <div class="hero">${fmtInt.format(s.pop)} <small>residents within a ${w.minutes}-min walk</small></div>
+        <dl class="rows">
+          <dt>Walking area</dt><dd>${fmt1.format(s.km2)} km²</dd>
+          <dt>Density in that area</dt><dd>${s.km2 > 0 ? fmtInt.format(s.pop / s.km2) : "–"} / km²</dd>
+        </dl>
+        <ul class="line-list">${lines}</ul>
+        <p class="note">
+          The area reached on foot in ${w.minutes} minutes at ${fmt1.format(w.kmh)} km/h (${fmtInt.format(w.metres)} m)
+          along streets, footpaths and stairs mapped in OpenStreetMap, from the station's platforms.
+          Residents are the census grid's, counting the share of each cell inside the area.
+        </p>
+      `;
+      document.getElementById("panel").hidden = false;
+    }
+
+    function selectStation(i) {
+      if (station !== null && map.getSource("stations")) map.setFeatureState({ source: "stations", id: station }, { selected: false });
+      station = i;
+      if (i === null) {
+        map.getSource("walk")?.setData(EMPTY);
+        return;
+      }
+      select(null);
+      showWalk(i);
+      showStation(i);
+      const [w, s, e, n] = metro.stations[i].walk.flat(2).reduce(
+        ([w, s, e, n], [x, y]) => [Math.min(w, x), Math.min(s, y), Math.max(e, x), Math.max(n, y)],
+        [Infinity, Infinity, -Infinity, -Infinity]);
+      const narrow = innerWidth <= 640;
+      map.fitBounds([[w, s], [e, n]], {
+        padding: narrow ? { top: 130, bottom: innerHeight * 0.55 + 10, left: 20, right: 20 } : { top: 40, bottom: 40, left: 340, right: 380 },
+        maxZoom: 15,
+      });
+    }
+
     function floorsBlock(c, i) {
       const n = c.apt_floors_n[i];
       if (!n) {
@@ -401,6 +571,7 @@
         highlightBuildings();
         return;
       }
+      selectStation(null);
       map.setFeatureState({ source: "cells", id: i }, { selected: true });
       showCell(i);
       highlightBuildings();
@@ -420,12 +591,43 @@
       hovered = null;
       map.getCanvas().style.cursor = "";
     });
-    map.on("click", (ev) => {
-      const hit = map.queryRenderedFeatures(ev.point, { layers: ["cells-fill"] })[0];
-      select(hit ? hit.id : null);
+    // Stations get a hit area wider than their dot, and win over the cell underneath.
+    const near = (p, r) => [[p.x - r, p.y - r], [p.x + r, p.y + r]];
+    const stationAt = (p) => map.getLayer("stations") && map.queryRenderedFeatures(near(p, 8), { layers: ["stations"] })[0];
+    const tip = new maplibregl.Popup({ closeButton: false, closeOnClick: false, offset: 12, className: "tip" });
+    let tipFor = null;
+    map.on("mousemove", (ev) => {
+      const hit = stationAt(ev.point);
+      if (!hit) {
+        if (tipFor !== null) {
+          tip.remove();
+          map.getCanvas().style.cursor = hovered !== null ? "pointer" : "";
+        }
+        tipFor = null;
+        return;
+      }
+      map.getCanvas().style.cursor = "pointer";
+      if (tipFor === hit.id) return;
+      tipFor = hit.id;
+      const s = metro.stations[hit.id];
+      const soon = s.planned.length ? `${s.lines.length ? " + " : ""}${s.planned.join(" ")} under construction` : "";
+      tip.setLngLat([s.lon, s.lat]).setHTML(`<b>${s.name}</b> · ${s.lines.join(" ")}${soon}`).addTo(map);
     });
-    document.getElementById("close").addEventListener("click", () => select(null));
-    document.addEventListener("keydown", (ev) => ev.key === "Escape" && select(null));
+    map.on("click", (ev) => {
+      const st = stationAt(ev.point);
+      if (st) return selectStation(st.id);
+      const hit = map.queryRenderedFeatures(ev.point, { layers: ["cells-fill"] })[0];
+      if (hit) return select(hit.id);
+      select(null);
+      selectStation(null);
+    });
+    const clearAll = () => { select(null); selectStation(null); };
+    document.getElementById("close").addEventListener("click", clearAll);
+    document.addEventListener("keydown", (ev) => ev.key === "Escape" && clearAll());
+    document.querySelector("#metro-toggle input").addEventListener("change", (ev) => {
+      for (const id of METRO_LAYERS) if (map.getLayer(id)) map.setLayoutProperty(id, "visibility", ev.target.checked ? "visible" : "none");
+      if (!ev.target.checked && station !== null) clearAll();
+    });
 
     // Switching theme swaps the basemap style, which drops our layers: re-add them.
     darkQuery.addEventListener("change", () => {
@@ -448,17 +650,34 @@
       styleReady = true;
       highlightedView = ""; // a new basemap means new building tiles: redo the highlight
       addLayers();
+      addMetroLayers();
     });
 
-    function loadData() {
+    function loadScript(src, global) {
       return new Promise((resolve, reject) => {
         const script = document.createElement("script");
-        script.src = `data/${REGION}.js`;
-        script.onload = () => (window.GRID_DATA ? resolve(window.GRID_DATA) : reject(new Error("empty data file")));
+        script.src = src;
+        script.onload = () => (window[global] ? resolve(window[global]) : reject(new Error("empty data file")));
         script.onerror = () => reject(new Error("file not found"));
         document.head.appendChild(script);
       });
     }
+    const loadData = () => loadScript(`data/${REGION}.js`, "GRID_DATA");
+
+    // The metro layer is optional: regions without data/<region>_metro.js just skip it.
+    loadScript(`data/${REGION}_metro.js`, "METRO_DATA")
+      .then((json) => {
+        metro = json;
+        const pct = (v) => Math.round((100 * v) / metro.total_pop);
+        const open = metro.stations.filter((s) => s.lines.length).length;
+        const building = metro.lines.filter((l) => l.planned).map((l) => l.name.match(/^Linha ([^\s:]+)/)?.[1] ?? l.ref);
+        document.getElementById("metro-summary").textContent =
+          `${metro.network}: ${open} stations · ${pct(metro.covered_pop)}% of residents live within a ${metro.walk.minutes}-min walk` +
+          (building.length ? `; ${pct(metro.covered_pop_planned)}% once the ${building.join(" and ")} lines (dashed) open` : "");
+        document.getElementById("metro-toggle").hidden = false;
+        addMetroLayers();
+      })
+      .catch(() => {});
 
     renderLegend();
     loadData()

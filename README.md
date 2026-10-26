@@ -6,6 +6,9 @@ households and average household size, its residential buildings split into sing
 apartment buildings and into 1–2 vs 3+ floors, and the average floors of its apartment buildings
 where OpenStreetMap maps them. When zoomed in (z13+), the cell's buildings are highlighted on the map.
 
+The metro lines and stations are drawn on top; click a station to see the area within a 10-minute
+walk of it and how many residents live there.
+
 **Open `index.html`** — a static page that works straight from disk or any static host.
 It loads the grid from `data/amp.js` (a script, so no server is needed); map tiles and the
 MapLibre/proj4 libraries come from CDNs. To publish, upload `index.html` and `data/*.js`
@@ -50,6 +53,20 @@ and comparing against the real figures, scaled to the equivalent cell size. Medi
 These are slightly optimistic, because the comparison grid is itself an estimate. Change the cell
 size with `CELL` in `pipeline/build_grid.py`; its `ERRORS` table feeds the popup.
 
+### Metro walking areas
+
+Lines and stations come from OpenStreetMap's Metro do Porto route relations. The Rosa (G) and Rubi (H)
+lines, under construction, are drawn dashed from OSM's construction track and station sites; their
+colours are our own until official ones exist. Rubi's Arrábida, Candal and Rotunda stations are not in
+OSM yet, so they are placed on the track by their described locations (Arrábida Shopping, the Candal
+viaduct, Rotunda Edgar Cardoso), within a few hundred metres. A station's walking area is everything
+reached in 10 minutes at 4.8 km/h — 800 m along streets, footpaths and stairs (no motorways) —
+starting from the streets within 80 m of its platforms. The reached paths are widened by 50 m,
+since front doors sit back from the street centre line, and enclosed gaps under 10 ha (block
+interiors) are filled. Residents come from the grid, counting the share of each cell inside the
+area, so they carry the grid's error. There is no time for stairs, slopes or waiting at crossings,
+so in steep parts of Porto 10 minutes is generous.
+
 ## Rebuild
 
 ```sh
@@ -64,6 +81,7 @@ uv run python pipeline/fetch_census.py amp
 uv run python pipeline/extract_osm.py amp
 uv run python pipeline/fetch_overture.py amp
 uv run python pipeline/build_grid.py amp     # -> data/amp.js
+uv run python pipeline/build_metro.py amp    # -> data/amp_metro.js (needs data/amp.js)
 
 # Not used by the grid yet: DGT LiDAR surface/terrain tiles for building heights
 # (needs a free cdd.dgterritorio.gov.pt account in ~/.dgt; ~4.4 GB for the AMP)
