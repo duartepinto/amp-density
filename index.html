@@ -1,0 +1,336 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Porto Density Grid</title>
+  <link rel="stylesheet" href="https://unpkg.com/maplibre-gl@4.7.1/dist/maplibre-gl.css">
+  <style>
+    :root {
+      --surface: #ffffff;
+      --ink: #1a1a19;
+      --ink-2: #4b4b47;
+      --muted: #76756f;
+      --line: #e4e3df;
+      color-scheme: light;
+    }
+    @media (prefers-color-scheme: dark) {
+      :root:not([data-theme="light"]) {
+        --surface: #222221;
+        --ink: #f2f1ee;
+        --ink-2: #c9c8c3;
+        --muted: #9a9993;
+        --line: #3a3a37;
+        color-scheme: dark;
+      }
+    }
+    :root[data-theme="dark"] {
+      --surface: #222221;
+      --ink: #f2f1ee;
+      --ink-2: #c9c8c3;
+      --muted: #9a9993;
+      --line: #3a3a37;
+      color-scheme: dark;
+    }
+
+    * { box-sizing: border-box; }
+    html, body { margin: 0; height: 100%; }
+    body {
+      background: var(--surface);
+      color: var(--ink);
+      font: 14px/1.4 system-ui, -apple-system, "Segoe UI", sans-serif;
+    }
+    #map { position: absolute; inset: 0; }
+    a { color: inherit; }
+    .muted { color: var(--muted); }
+    .small { font-size: 12px; }
+
+    .card {
+      position: absolute;
+      background: var(--surface);
+      border: 1px solid var(--line);
+      border-radius: 10px;
+      box-shadow: 0 2px 12px rgb(0 0 0 / 0.12);
+      padding: 12px 14px;
+    }
+    #title { top: 12px; left: 12px; width: 300px; }
+    #title h1 { font-size: 16px; margin: 0 0 2px; }
+    #title p { margin: 0; }
+    #credits { bottom: 12px; left: 12px; padding: 6px 10px; max-width: calc(100% - 24px); }
+
+    /* Legend: one row of swatches with break labels under the seams */
+    #legend { display: grid; grid-auto-flow: column; grid-auto-columns: 1fr; gap: 2px; margin: 10px 0 18px; }
+    #legend .sw { height: 10px; position: relative; }
+    #legend .sw:first-child { border-radius: 4px 0 0 4px; }
+    #legend .sw:last-child { border-radius: 0 4px 4px 0; }
+    #legend .sw span {
+      position: absolute; top: 13px; left: -1px; transform: translateX(-50%);
+      font-size: 11px; color: var(--muted); white-space: nowrap;
+    }
+    #legend .sw:first-child span { transform: none; left: 0; }
+
+    #panel { top: 12px; right: 12px; width: 300px; max-height: calc(100% - 24px); overflow-y: auto; }
+    #close {
+      position: absolute; top: 6px; right: 8px; border: 0; background: none;
+      font-size: 22px; line-height: 1; color: var(--muted); cursor: pointer; padding: 4px;
+    }
+    .hero { font-size: 28px; font-weight: 650; letter-spacing: -0.01em; font-variant-numeric: tabular-nums; }
+    .hero small { font-size: 13px; font-weight: 400; color: var(--muted); }
+    .rows { display: grid; grid-template-columns: 1fr auto; gap: 3px 12px; margin-top: 12px; font-variant-numeric: tabular-nums; }
+    .rows dt { color: var(--ink-2); }
+    .rows dd { margin: 0; text-align: right; font-weight: 550; }
+    .note { font-size: 12px; color: var(--muted); margin: 10px 0 0; }
+
+    @media (max-width: 640px) {
+      #title { right: 12px; width: auto; }
+      #panel { top: auto; bottom: 0; right: 0; left: 0; width: auto; max-height: 55%; border-radius: 12px 12px 0 0; }
+      #credits { display: none; }
+      .maplibregl-ctrl-bottom-right .maplibregl-ctrl-group { display: none; } /* pinch-zoom instead */
+    }
+  </style>
+</head>
+<body>
+  <div id="map"></div>
+
+  <header class="card" id="title">
+    <h1 id="region">Population density</h1>
+    <p class="muted" id="subtitle">Residents per km² · Census 2021</p>
+    <div id="legend"></div>
+    <p class="muted small" id="status">Loading grid…</p>
+  </header>
+
+  <aside class="card" id="panel" hidden>
+    <button id="close" aria-label="Close">×</button>
+    <div id="panel-body"></div>
+  </aside>
+
+  <footer class="card small muted" id="credits">
+    Census: <a href="https://censos.ine.pt">INE Censos 2021 (BGRI)</a> ·
+    placed using buildings from <a href="https://www.openstreetmap.org/copyright">© OpenStreetMap</a>,
+    <a href="https://overturemaps.org">Overture Maps</a> and
+    <a href="https://human-settlement.emergency.copernicus.eu">GHSL</a>
+  </footer>
+
+  <script src="https://unpkg.com/maplibre-gl@4.7.1/dist/maplibre-gl.js"></script>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/proj4js/2.12.1/proj4.js"></script>
+  <script>
+    // Population density grid: renders the cells in data/<region>.js
+    // (produced by pipeline/build_grid.py) and shows a cell's residents on click.
+    // The data is a plain <script> (not fetched JSON) so the page also works from file://.
+
+    const REGION = new URLSearchParams(location.search).get("region") || "amp";
+
+    proj4.defs(
+      "EPSG:3035",
+      "+proj=laea +lat_0=52 +lon_0=10 +x_0=4321000 +y_0=3210000 +ellps=GRS80 +units=m +no_defs"
+    );
+    const toLonLat = proj4("EPSG:3035", "EPSG:4326");
+
+    // Residents per km² class breaks (lower bounds). Green -> orange -> red with
+    // lightness falling step by step, so the order still reads without hue.
+    const BREAKS = [0, 100, 500, 1000, 2500, 5000, 10000];
+    const RAMP = ["#59de65", "#9dcd0d", "#e1ab11", "#e68710", "#e25500", "#cc2a1b", "#a20519"];
+    const BASEMAP = {
+      light: "https://basemaps.cartocdn.com/gl/positron-gl-style/style.json",
+      dark: "https://basemaps.cartocdn.com/gl/dark-matter-gl-style/style.json",
+    };
+
+    const darkQuery = matchMedia("(prefers-color-scheme: dark)");
+    const theme = () => {
+      const forced = document.documentElement.dataset.theme;
+      return forced || (darkQuery.matches ? "dark" : "light");
+    };
+
+    let data; // { columns: { e, n, pop }, count, cell, bounds, region }
+    let selected = null;
+    // isStyleLoaded() is false while tiles load, so track "style.load" ourselves.
+    let styleReady = false;
+    const startedWithView = Boolean(location.hash); // MapLibre writes the hash on load
+
+    const map = new maplibregl.Map({
+      container: "map",
+      style: BASEMAP[theme()],
+      center: [-8.6, 41.15],
+      zoom: 10,
+      hash: true,
+      attributionControl: { compact: true },
+    });
+    map.addControl(new maplibregl.NavigationControl({ showCompass: false }), "bottom-right");
+
+    const fmtInt = new Intl.NumberFormat("en-GB", { maximumFractionDigits: 0 });
+    const fmt1 = new Intl.NumberFormat("en-GB", { maximumFractionDigits: 1 });
+
+    function compact(v) {
+      return v >= 1000 ? `${fmt1.format(v / 1000)}k` : fmtInt.format(v);
+    }
+
+    const cellKm2 = () => (data.cell * data.cell) / 1e6;
+
+    function fillColor() {
+      const expr = ["step", ["get", "d"], RAMP[0]];
+      for (let i = 1; i < BREAKS.length; i++) expr.push(BREAKS[i], RAMP[i]);
+      return expr;
+    }
+
+    function renderLegend() {
+      document.getElementById("legend").innerHTML = BREAKS.map(
+        (b, i) => `<div class="sw" style="background:${RAMP[i]}"><span>${compact(b)}</span></div>`
+      ).join("");
+    }
+
+    function buildGeoJSON() {
+      const { e, n, pop } = data.columns;
+      const size = data.cell;
+      const features = new Array(data.count);
+      for (let i = 0; i < data.count; i++) {
+        const x0 = e[i] * size, y0 = n[i] * size, x1 = x0 + size, y1 = y0 + size;
+        const ring = [[x0, y0], [x1, y0], [x1, y1], [x0, y1], [x0, y0]].map((p) => toLonLat.forward(p));
+        features[i] = {
+          type: "Feature",
+          id: i,
+          properties: { d: pop[i] / cellKm2() },
+          geometry: { type: "Polygon", coordinates: [ring] },
+        };
+      }
+      return { type: "FeatureCollection", features };
+    }
+
+    function addLayers() {
+      if (!data || map.getSource("cells")) return;
+      map.addSource("cells", { type: "geojson", data: buildGeoJSON(), tolerance: 0 });
+      // Cells go under the streets (so roads stay visible on top) but over building
+      // footprints, which the basemap draws above roads and would otherwise hide the
+      // colour. The selection outline sits above everything but the labels.
+      const layers = map.getStyle().layers;
+      // CARTO names these "roads"/"buildings"; OpenMapTiles styles "transportation"/"building".
+      const isRoad = (l) => ["roads", "transportation"].includes(l["source-layer"]);
+      const isBuilding = (l) => ["buildings", "building"].includes(l["source-layer"]);
+      const roadsStart = layers.find(isRoad)?.id;
+      const labelsStart = layers[layers.findLastIndex((l) => l.type !== "symbol") + 1]?.id;
+      map.addLayer(
+        {
+          id: "cells-fill",
+          type: "fill",
+          source: "cells",
+          paint: {
+            "fill-color": fillColor(),
+            "fill-opacity": ["interpolate", ["linear"], ["zoom"], 9, 0.85, 15, 0.6],
+          },
+        },
+        roadsStart
+      );
+      map.addLayer(
+        {
+          id: "cells-line",
+          type: "line",
+          source: "cells",
+          paint: {
+            "line-color": theme() === "dark" ? "#f2f1ee" : "#1a1a19",
+            "line-width": ["case", ["boolean", ["feature-state", "selected"], false], 2.5,
+              ["boolean", ["feature-state", "hover"], false], 1.2, 0],
+          },
+        },
+        labelsStart
+      );
+      for (const l of layers) {
+        if (isBuilding(l)) map.moveLayer(l.id, "cells-fill");
+      }
+      if (selected !== null) map.setFeatureState({ source: "cells", id: selected }, { selected: true });
+    }
+
+    function showCell(i) {
+      const c = data.columns;
+      const density = c.pop[i] / cellKm2();
+      const [lon, lat] = toLonLat.forward([(c.e[i] + 0.5) * data.cell, (c.n[i] + 0.5) * data.cell]);
+      const view = `${lat.toFixed(5)}/${lon.toFixed(5)}`;
+
+      document.getElementById("panel-body").innerHTML = `
+        <div class="hero">${fmtInt.format(density)} <small>residents / km²</small></div>
+        <dl class="rows">
+          <dt>Residents in this cell</dt><dd>${fmtInt.format(c.pop[i])}</dd>
+          <dt>Cell size</dt><dd>${data.cell} m × ${data.cell} m</dd>
+        </dl>
+        <p class="note">
+          Census 2021 residents, spread from census blocks onto the grid using building
+          footprints.${data.typical_error ? ` Typical error per cell is about ±${data.typical_error}.` : ""}
+        </p>
+        <p class="note">
+          Cell ${c.e[i]}E ${c.n[i]}N (EPSG:3035) ·
+          <a href="https://www.openstreetmap.org/?mlat=${lat.toFixed(5)}&mlon=${lon.toFixed(5)}#map=15/${view}" target="_blank" rel="noopener">OSM</a> ·
+          <a href="https://www.google.com/maps/@${lat.toFixed(5)},${lon.toFixed(5)},700m/data=!3m1!1e3" target="_blank" rel="noopener">Satellite</a>
+        </p>
+      `;
+      document.getElementById("panel").hidden = false;
+    }
+
+    function select(i) {
+      if (selected !== null) map.setFeatureState({ source: "cells", id: selected }, { selected: false });
+      selected = i;
+      if (i === null) {
+        document.getElementById("panel").hidden = true;
+        return;
+      }
+      map.setFeatureState({ source: "cells", id: i }, { selected: true });
+      showCell(i);
+    }
+
+    let hovered = null;
+    map.on("mousemove", "cells-fill", (ev) => {
+      const id = ev.features[0].id;
+      if (hovered === id) return;
+      if (hovered !== null) map.setFeatureState({ source: "cells", id: hovered }, { hover: false });
+      hovered = id;
+      map.setFeatureState({ source: "cells", id }, { hover: true });
+      map.getCanvas().style.cursor = "pointer";
+    });
+    map.on("mouseleave", "cells-fill", () => {
+      if (hovered !== null) map.setFeatureState({ source: "cells", id: hovered }, { hover: false });
+      hovered = null;
+      map.getCanvas().style.cursor = "";
+    });
+    map.on("click", (ev) => {
+      const hit = map.queryRenderedFeatures(ev.point, { layers: ["cells-fill"] })[0];
+      select(hit ? hit.id : null);
+    });
+    document.getElementById("close").addEventListener("click", () => select(null));
+    document.addEventListener("keydown", (ev) => ev.key === "Escape" && select(null));
+
+    // Switching theme swaps the basemap style, which drops our layers: re-add them.
+    darkQuery.addEventListener("change", () => {
+      styleReady = false;
+      map.setStyle(BASEMAP[theme()], { diff: false }); // diffing would skip "style.load"
+    });
+    map.on("style.load", () => {
+      styleReady = true;
+      addLayers();
+    });
+
+    function loadData() {
+      return new Promise((resolve, reject) => {
+        const script = document.createElement("script");
+        script.src = `data/${REGION}.js`;
+        script.onload = () => (window.GRID_DATA ? resolve(window.GRID_DATA) : reject(new Error("empty data file")));
+        script.onerror = () => reject(new Error("file not found"));
+        document.head.appendChild(script);
+      });
+    }
+
+    renderLegend();
+    loadData()
+      .then((json) => {
+        data = json;
+        document.getElementById("region").textContent = data.region;
+        document.getElementById("subtitle").textContent =
+          `Residents per km² · ${data.cell} m × ${data.cell} m cells · Census 2021`;
+        const total = data.columns.pop.reduce((a, b) => a + b, 0);
+        document.getElementById("status").textContent =
+          `${fmtInt.format(total)} residents in ${fmtInt.format(data.count)} cells · click a cell for details`;
+        if (!startedWithView) map.fitBounds([data.bounds.slice(0, 2), data.bounds.slice(2)], { padding: 20, duration: 0 });
+        if (styleReady) addLayers();
+      })
+      .catch((err) => {
+        document.getElementById("status").textContent = `Could not load data/${REGION}.js (${err.message}). Run the pipeline first.`;
+      });
+  </script>
+</body>
+</html>
