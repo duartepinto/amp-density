@@ -1,4 +1,4 @@
-# Portugal density grid
+# AMP density grid
 
 An interactive map of where people live in the Área Metropolitana do Porto (AMP), on a
 250 m × 250 m grid, with the metro and suburban train networks and how many residents each
