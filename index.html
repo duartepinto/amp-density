@@ -74,6 +74,8 @@
     #title { top: 12px; left: 12px; width: 300px; }
     #title h1 { font-size: 16px; margin: 0 0 2px; }
     #title p { margin: 0; }
+    #fold { display: none; }
+    #fold, #grip { -webkit-tap-highlight-color: transparent; }
     #credits { bottom: 12px; left: 12px; padding: 6px 10px; max-width: calc(100% - 24px); }
 
     /* Legend: one row of swatches with break labels under the seams */
@@ -87,7 +89,11 @@
     }
     #legend .sw:first-child span { transform: none; left: 0; }
 
-    #panel { top: 12px; right: 12px; width: 340px; max-height: calc(100% - 24px); overflow-y: auto; }
+    /* The panel body scrolls, so the close button (and on phones the grip) stay put. */
+    #panel { top: 12px; right: 12px; width: 340px; max-height: calc(100% - 24px); display: flex; flex-direction: column; }
+    #panel[hidden] { display: none; }
+    #panel-body { overflow-y: auto; min-height: 0; overscroll-behavior: contain; }
+    #grip { display: none; }
     #close {
       position: absolute; top: 6px; right: 8px; border: 0; background: none;
       font-size: 22px; line-height: 1; color: var(--muted); cursor: pointer; padding: 4px;
@@ -139,8 +145,37 @@
     .tip .maplibregl-popup-tip { display: none; }
 
     @media (max-width: 640px) {
-      #title { right: 12px; width: auto; }
-      #panel { top: auto; bottom: 0; right: 0; left: 0; width: auto; max-height: 55%; border-radius: 12px 12px 0 0; }
+      #title { top: 8px; left: 8px; right: 8px; width: auto; padding: 8px 12px; }
+      /* The title card folds to its name and legend: on request, and while something is selected. */
+      #title h1 { margin-right: 32px; }
+      #fold {
+        display: block; position: absolute; top: 0; right: 0; width: 44px; height: 40px;
+        border: 0; padding: 0; background: none; color: var(--muted); cursor: pointer;
+      }
+      #fold::before {
+        content: ""; display: block; width: 8px; height: 8px; margin: 0 auto;
+        border: solid currentColor; border-width: 0 2px 2px 0; transform: translateY(-2px) rotate(225deg);
+      }
+      #title.folded #fold::before { transform: translateY(-4px) rotate(45deg); }
+      #title.folded #subtitle, #title.folded #status, #title.folded #transit-toggles { display: none; }
+      #title.folded #legend { margin-bottom: 14px; }
+      /* Bottom sheet: a short peek at the top of the details, tap or swipe up for the rest. */
+      #panel {
+        top: auto; bottom: 0; right: 0; left: 0; width: auto; max-height: 80%;
+        border-radius: 12px 12px 0 0; padding-top: 20px;
+        z-index: 3; /* over the map's attribution */
+      }
+      #panel:not(.expanded) { max-height: 160px; cursor: pointer; }
+      #panel:not(.expanded) #panel-body { overflow: hidden; }
+      #panel:not(.expanded)::after {
+        content: ""; position: absolute; left: 0; right: 0; bottom: 0; height: 32px;
+        background: linear-gradient(transparent, var(--surface)); pointer-events: none;
+      }
+      #grip {
+        display: block; position: absolute; top: 0; left: 50%; transform: translateX(-50%);
+        width: 96px; height: 20px; border: 0; padding: 0; background: none; cursor: pointer;
+      }
+      #grip::before { content: ""; display: block; width: 36px; height: 4px; margin: 8px auto 0; border-radius: 2px; background: var(--muted); opacity: 0.5; }
       #credits { display: none; }
       .maplibregl-ctrl-bottom-right .maplibregl-ctrl-group { display: none; } /* pinch-zoom instead */
     }
@@ -150,6 +185,7 @@
   <div id="map"></div>
 
   <header class="card" id="title">
+    <button id="fold" aria-label="Show less" aria-expanded="true" aria-controls="title"></button>
     <h1 id="region">Population density</h1>
     <p class="muted" id="subtitle">Residents per km² · Census 2021</p>
     <div id="legend"></div>
@@ -158,6 +194,7 @@
   </header>
 
   <aside class="card" id="panel" hidden>
+    <button id="grip" aria-label="Show more details" aria-expanded="false"></button>
     <button id="close" aria-label="Close">×</button>
     <div id="panel-body"></div>
   </aside>
@@ -196,6 +233,7 @@
     };
 
     const darkQuery = matchMedia("(prefers-color-scheme: dark)");
+    const narrowQuery = matchMedia("(max-width: 640px)"); // phones: title on top, details in a bottom sheet
     const theme = () => {
       const forced = document.documentElement.dataset.theme;
       return forced || (darkQuery.matches ? "dark" : "light");
@@ -587,7 +625,7 @@
         ${lines}
         ${trainsBlock(s)}
       `;
-      document.getElementById("panel").hidden = false;
+      openPanel();
     }
 
     function selectStation(i) {
@@ -603,9 +641,11 @@
       const [w, s, e, n] = transit.stations[i].walk.flat(2).reduce(
         ([w, s, e, n], [x, y]) => [Math.min(w, x), Math.min(s, y), Math.max(e, x), Math.max(n, y)],
         [Infinity, Infinity, -Infinity, -Infinity]);
-      const narrow = innerWidth <= 640;
+      const free = clearArea();
       map.fitBounds([[w, s], [e, n]], {
-        padding: narrow ? { top: 130, bottom: innerHeight * 0.55 + 10, left: 20, right: 20 } : { top: 40, bottom: 40, left: 340, right: 380 },
+        padding: narrowQuery.matches
+          ? { top: free.top + 10, bottom: innerHeight - free.bottom + 10, left: 20, right: 20 }
+          : { top: 40, bottom: 40, left: 340, right: 380 },
         maxZoom: 15,
       });
     }
@@ -668,14 +708,52 @@
           <a href="https://www.google.com/maps/@${lat.toFixed(5)},${lon.toFixed(5)},700m/data=!3m1!1e3" target="_blank" rel="noopener">Satellite</a>
         </p>
       `;
-      document.getElementById("panel").hidden = false;
+      openPanel();
+    }
+
+    // Each new selection opens the panel at the top; on phones as a collapsed sheet.
+    const panel = document.getElementById("panel");
+    function openPanel() {
+      panel.hidden = false;
+      expandPanel(false);
+      foldTitle(true);
+    }
+    function closePanel() {
+      panel.hidden = true;
+      foldTitle(titleFolded);
+    }
+    // Phones: the title card folds while something is selected, and otherwise as the
+    // viewer last left it with its fold button.
+    let titleFolded = false;
+    function foldTitle(folded) {
+      document.getElementById("title").classList.toggle("folded", folded);
+      const button = document.getElementById("fold");
+      button.setAttribute("aria-expanded", !folded);
+      button.setAttribute("aria-label", folded ? "Show more" : "Show less");
+    }
+    document.getElementById("fold").addEventListener("click", () => {
+      titleFolded = !document.getElementById("title").classList.contains("folded");
+      foldTitle(titleFolded);
+    });
+    function expandPanel(open) {
+      panel.classList.toggle("expanded", open);
+      document.getElementById("grip").setAttribute("aria-expanded", open);
+      if (!open) document.getElementById("panel-body").scrollTop = 0;
+    }
+
+    // The part of the screen (in pixels from the top) not covered by the title card and
+    // the panel. On wide screens both sit at the sides, so it is the whole height.
+    function clearArea() {
+      if (!narrowQuery.matches) return { top: 0, bottom: innerHeight };
+      const top = document.getElementById("title").getBoundingClientRect().bottom;
+      return { top, bottom: panel.hidden ? innerHeight : panel.getBoundingClientRect().top };
     }
 
     function select(i) {
       if (selected !== null) map.setFeatureState({ source: "cells", id: selected }, { selected: false });
       selected = i;
       if (i === null) {
-        document.getElementById("panel").hidden = true;
+        closePanel();
         highlightBuildings();
         return;
       }
@@ -683,6 +761,13 @@
       map.setFeatureState({ source: "cells", id: i }, { selected: true });
       showCell(i);
       highlightBuildings();
+      // On phones, slide the cell out from under the title card or the sheet.
+      const c = data.columns;
+      const centre = toLonLat.forward([(c.e[i] + 0.5) * data.cell, (c.n[i] + 0.5) * data.cell]);
+      const { y } = map.project(centre);
+      const free = clearArea();
+      const margin = Math.min(40, (free.bottom - free.top) / 4);
+      if (y < free.top + margin || y > free.bottom - margin) map.panBy([0, y - (free.top + free.bottom) / 2]);
     }
 
     let hovered = null;
@@ -732,6 +817,32 @@
     });
     const clearAll = () => { select(null); selectStation(null); };
     document.getElementById("close").addEventListener("click", clearAll);
+    // Bottom sheet (phones): the grip toggles it, a tap on the peek expands it, and a swipe
+    // up expands it while a swipe down collapses it (once scrolled to the top) or closes it.
+    document.getElementById("grip").addEventListener("click", (ev) => {
+      ev.stopPropagation();
+      expandPanel(!panel.classList.contains("expanded"));
+    });
+    panel.addEventListener("click", (ev) => {
+      if (!narrowQuery.matches || panel.classList.contains("expanded") || ev.target.closest("a, button")) return;
+      expandPanel(true);
+    });
+    // A swipe that scrolled the details back to the top is a scroll, so the scroll
+    // position is taken from the swipe's start.
+    let swipe = null;
+    panel.addEventListener("touchstart", (ev) => {
+      swipe = { y: ev.touches[0].clientY, atTop: document.getElementById("panel-body").scrollTop <= 0 };
+    }, { passive: true });
+    panel.addEventListener("touchend", (ev) => {
+      if (swipe === null || !narrowQuery.matches) return;
+      const dy = ev.changedTouches[0].clientY - swipe.y;
+      const { atTop } = swipe;
+      swipe = null;
+      const expanded = panel.classList.contains("expanded");
+      if (dy < -30 && !expanded) expandPanel(true);
+      else if (dy > 30 && expanded && atTop) expandPanel(false);
+      else if (dy > 30 && !expanded) clearAll();
+    });
     document.addEventListener("keydown", (ev) => ev.key === "Escape" && clearAll());
     document.getElementById("transit-toggles").addEventListener("change", (ev) => {
       const key = ev.target.dataset.net;
