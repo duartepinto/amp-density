@@ -267,6 +267,9 @@ departing are counted per line and direction:
 - **Stations:** interchanges (more than one line) get bigger markers; future stations have a grey
   outline; planned lines are dashed; the selected station's marker is filled.
 - **Errors:** the popup notes show the typical error for the cell size (from `ERRORS`).
+- **Language:** English or European Portuguese, from the browser's languages (Portuguese if it
+  comes before English, English otherwise); the EN | PT switch in the title card changes it and is
+  remembered, and `?lang=pt` or `?lang=en` forces one. The text is in `I18N` in `index.html`.
 - Light and dark themes follow the system setting. The URL hash keeps the view;
   `index.html?region=<key>` loads `data/<key>.js` and `data/<key>_transit.js`.
 

@@ -136,6 +136,17 @@
       transition: background 0.2s, transform 0.2s;
     }
     .coffee-button:hover { background: #FFE135; transform: translateY(-1px); }
+    /* Card foot: the donation link and the language switch */
+    .card-foot { display: flex; align-items: center; justify-content: space-between; gap: 8px; margin-top: 10px; }
+    .card-foot .coffee-button { margin-top: 0; }
+    #lang { display: flex; gap: 2px; font-size: 12px; }
+    #lang button {
+      border: 1px solid var(--line); background: none; color: var(--muted); padding: 3px 7px;
+      font: inherit; font-weight: 600; cursor: pointer;
+    }
+    #lang button:first-child { border-radius: 6px 0 0 6px; }
+    #lang button:last-child { border-radius: 0 6px 6px 0; }
+    #lang button[aria-pressed="true"] { background: var(--ink); border-color: var(--ink); color: var(--surface); }
     .station-name { font-size: 20px; font-weight: 650; margin: 0 24px 8px 0; }
     .badge {
       display: inline-flex; align-items: center; justify-content: center; min-width: 20px; height: 20px;
@@ -172,7 +183,7 @@
         border: solid currentColor; border-width: 0 2px 2px 0; transform: translateY(-2px) rotate(225deg);
       }
       #title.folded #fold::before { transform: translateY(-4px) rotate(45deg); }
-      #title.folded #subtitle, #title.folded #status, #title.folded #transit-toggles, #title.folded .coffee-button { display: none; }
+      #title.folded #subtitle, #title.folded #status, #title.folded #transit-toggles, #title.folded .card-foot { display: none; }
       #title.folded #legend { margin-bottom: 14px; }
       /* Bottom sheet: a short peek at the top of the details, tap or swipe up for the rest. */
       #panel {
@@ -206,7 +217,13 @@
     <div id="legend"></div>
     <p class="muted small" id="status">Loading grid…</p>
     <div id="transit-toggles"></div>
-    <a href="https://coff.ee/duartepinto" target="_blank" rel="noopener" class="coffee-button"><span aria-hidden="true">☕</span> Buy me a coffee</a>
+    <div class="card-foot">
+      <a href="https://coff.ee/duartepinto" target="_blank" rel="noopener" class="coffee-button"><span aria-hidden="true">☕</span> <span id="coffee-text">Buy me a coffee</span></a>
+      <div id="lang" role="group" aria-label="Language">
+        <button type="button" data-lang="en" lang="en">EN</button>
+        <button type="button" data-lang="pt" lang="pt-PT">PT</button>
+      </div>
+    </div>
   </header>
 
   <aside class="card" id="panel" hidden>
@@ -274,8 +291,208 @@
     });
     map.addControl(new maplibregl.NavigationControl({ showCompass: false }), "bottom-right");
 
-    const fmtInt = new Intl.NumberFormat("en-GB", { maximumFractionDigits: 0 });
-    const fmt1 = new Intl.NumberFormat("en-GB", { maximumFractionDigits: 1 });
+    // Interface text in English and European Portuguese. The language comes from ?lang=,
+    // else the viewer's last choice, else the first of the browser's languages we have.
+    const I18N = {
+      en: {
+        locale: "en-GB",
+        dateMonth: "short",
+        title: "Porto Density Grid",
+        heading: "Population density",
+        subtitleShort: "Residents per km² · Census 2021",
+        subtitle: (cell) => `Residents per km² · ${cell} m × ${cell} m cells · Census 2021`,
+        loading: "Loading grid…",
+        status: (total, cells) => `${total} residents in ${cells} cells · click a cell for details`,
+        loadError: (file, msg) => `Could not load ${file} (${msg}). Run the pipeline first.`,
+        showMoreDetails: "Show more details",
+        close: "Close",
+        showMore: "Show more",
+        showLess: "Show less",
+        language: "Language",
+        coffee: "Buy me a coffee",
+        credits: `Census: <a href="https://censos.ine.pt">INE Censos 2021 (BGRI)</a> ·
+          placed using buildings from <a href="https://www.openstreetmap.org/copyright">© OpenStreetMap</a>,
+          <a href="https://overturemaps.org">Overture Maps</a> and
+          <a href="https://human-settlement.emergency.copernicus.eu">GHSL</a> ·
+          rail lines, walking paths and roads from OpenStreetMap ·
+          metro timetable from <a href="https://www.metrodoporto.pt/pages/337">Metro do Porto</a>`,
+        // Cell panel
+        perKm2: "residents / km²",
+        residents: "Residents",
+        dwellings: "Dwellings",
+        households: "Households",
+        hhSize: "Average household size",
+        cellSize: "Cell size",
+        cellNote: "Census 2021, spread from census blocks onto the grid using building footprints.",
+        cellError: (pop, hh) => `Typical error per cell: counts ±${pop}${hh ? `, household size ±${hh}` : ""}.`,
+        resBuildings: "Residential buildings",
+        withDwellings: "Buildings with dwellings",
+        singleFamily: "Single-family",
+        apartments: "Apartments",
+        typeNote: "Single-family = built for 1–2 dwellings; apartment building = built for 3 or more (INE).",
+        typeError: (count, share) => `Typical error: count ±${count}, apartment share ±${share}.`,
+        floors: "Floors",
+        lowRise: "1–2 floors",
+        midRise: "3 or more",
+        floorsNote: "Residential buildings by number of floors (INE).",
+        floorsError: (e) => ` Typical error on the share: ±${e}.`,
+        floorsNone: "<b>Average apartment building height:</b> not mapped in OpenStreetMap for this cell.",
+        floorsValue: (v) => `${v} floors`,
+        floorsFrom: (n) => `Average apartment building height, from ${n} building${n > 1 ? "s" : ""} with floors mapped in OpenStreetMap.`,
+        zoomHint: "Zoom in to see this cell's buildings highlighted.",
+        highlighted: "This cell's buildings are highlighted (map shapes from OpenStreetMap).",
+        cell: "Cell",
+        satellite: "Satellite",
+        points: "pts",
+        // Station panel
+        future: "Future station, not open yet.",
+        approx: " Location approximate: OpenStreetMap does not map it yet, so it is placed on the line by its described location.",
+        walkHero: (m) => `residents within a ${m}-min walk`,
+        walkArea: "Walking area",
+        densityThere: "Density in that area",
+        walkNote: (m, kmh, metres) => `The area reached on foot in ${m} minutes at ${kmh} km/h (${metres} m) along streets,
+          footpaths and stairs mapped in OpenStreetMap, from the station's platforms. Residents are the census grid's,
+          counting the share of each cell inside the area.`,
+        byCar: "By car",
+        driveHero: (m) => `residents within a ${m}-min drive`,
+        driveArea: "Driving area",
+        driveNote: (m, share, signal, junction, reach) => `Where one can drive to the station from in ${m} minutes
+          (dashed outline), along roads mapped in OpenStreetMap at free-flow speeds: typical speeds by road type, or
+          ${share}% of the speed limit where mapped, one-way streets respected, losing ${signal} s at each traffic light
+          and ${junction} s at other junctions. Congestion and parking are not counted, so at rush hour the real area is
+          smaller. Homes within ${reach} m of a reached road count.`,
+        planned: (line, opening) => {
+          const word = line.name.match(/^Linha (\S+)$/)?.[1];
+          return `${word ? `${word} line, ` : ""}${line.ends} · <i>under construction${opening ? `, opening ${opening}` : ""}</i>`;
+        },
+        underConstruction: "under construction",
+        nets: { Metro: "Metro", Trains: "Trains" },
+        frequency: "Frequency",
+        noTimetable: (names) => `No timetable for ${names} yet.`,
+        trainsTotal: (n, net, several) => `<b>${n}</b> ${several ? `${net.label.toLowerCase()} trains` : "trains"}
+          an hour stop here at weekday peak, both directions`,
+        all: "All",
+        periods: { Peak: "Peak", Midday: "Midday", Evening: "Evening", Sat: "Sat", Sun: "Sun" },
+        hours: (h) => h,
+        days: { monday: "Weekdays", saturday: "Saturdays", sunday: "Sundays and holidays" },
+        freqNote: (weekday, weekend, network, from, to) => `Minutes between trains in each direction. Weekdays: ${weekday};
+          weekends ${weekend}. From ${network}'s timetable for ${from} – ${to}.`,
+        // Title card
+        toggle: (names, stations, walkPct, m) => `${names}: ${stations} stations · ${walkPct}% of residents live within a ${m}-min walk`,
+        togglePlanned: (p, lines) => `; ${p}% once the ${lines.join(" and ")} lines (dashed) open`,
+        toggleDrive: (p, m) => `; ${p}% within a ${m}-min drive`,
+        anyStation: (p, m) => `${p}% live within a ${m}-min walk of any station.`,
+        plannedName: (line) => line.name.match(/^Linha (\S+)$/)?.[1] ?? line.label,
+      },
+      pt: {
+        locale: "pt-PT",
+        dateMonth: "long", // "7 de setembro de 2026"; short months come out as 7/09/2026
+        title: "Densidade populacional do Porto",
+        heading: "Densidade populacional",
+        subtitleShort: "Residentes por km² · Censos 2021",
+        subtitle: (cell) => `Residentes por km² · células de ${cell} m × ${cell} m · Censos 2021`,
+        loading: "A carregar a grelha…",
+        status: (total, cells) => `${total} residentes em ${cells} células · clique numa célula para ver os detalhes`,
+        loadError: (file, msg) => `Não foi possível carregar ${file} (${msg}). Corra primeiro os scripts em pipeline/.`,
+        showMoreDetails: "Mostrar mais detalhes",
+        close: "Fechar",
+        showMore: "Mostrar mais",
+        showLess: "Mostrar menos",
+        language: "Idioma",
+        coffee: "Ofereça-me um café",
+        credits: `Dados dos Censos 2021: <a href="https://censos.ine.pt">INE (BGRI)</a> ·
+          distribuídos segundo os edifícios do <a href="https://www.openstreetmap.org/copyright">© OpenStreetMap</a>,
+          da <a href="https://overturemaps.org">Overture Maps</a> e do
+          <a href="https://human-settlement.emergency.copernicus.eu">GHSL</a> ·
+          linhas de metro e comboio, caminhos e estradas do OpenStreetMap ·
+          horários do <a href="https://www.metrodoporto.pt/pages/337">Metro do Porto</a>`,
+        perKm2: "residentes / km²",
+        residents: "Residentes",
+        dwellings: "Alojamentos",
+        households: "Agregados domésticos",
+        hhSize: "Dimensão média do agregado",
+        cellSize: "Tamanho da célula",
+        cellNote: "Dados dos Censos 2021, repartidos pela grelha a partir das subsecções estatísticas, com base na área de implantação dos edifícios.",
+        cellError: (pop, hh) => `Erro típico por célula: contagens ±${pop}${hh ? `, dimensão do agregado ±${hh}` : ""}.`,
+        resBuildings: "Edifícios residenciais",
+        withDwellings: "Edifícios com alojamentos",
+        singleFamily: "Moradias",
+        apartments: "Prédios",
+        typeNote: "Moradia = construída para 1 ou 2 alojamentos; prédio = construído para 3 ou mais (INE).",
+        typeError: (count, share) => `Erro típico: contagem ±${count}, proporção de prédios ±${share}.`,
+        floors: "Pisos",
+        lowRise: "1 ou 2 pisos",
+        midRise: "3 ou mais",
+        floorsNote: "Edifícios residenciais por número de pisos (INE).",
+        floorsError: (e) => ` Erro típico na proporção: ±${e}.`,
+        floorsNone: "<b>Altura média dos prédios:</b> o número de pisos não está mapeado no OpenStreetMap nesta célula.",
+        floorsValue: (v) => `${v} pisos`,
+        floorsFrom: (n) => `Altura média dos prédios, a partir de ${n} edifício${n > 1 ? "s" : ""} com o número de pisos mapeado no OpenStreetMap.`,
+        zoomHint: "Amplie o mapa para ver os edifícios desta célula em destaque.",
+        highlighted: "Os edifícios desta célula estão em destaque (contornos do OpenStreetMap).",
+        cell: "Célula",
+        satellite: "Satélite",
+        points: "pontos percentuais",
+        future: "Futura estação, ainda sem serviço.",
+        approx: " Posição aproximada: como ainda não consta do OpenStreetMap, foi colocada na linha de acordo com a localização anunciada.",
+        walkHero: (m) => `residentes a ${m} min a pé`,
+        walkArea: "Área abrangida",
+        densityThere: "Densidade nessa área",
+        walkNote: (m, kmh, metres) => `Área que se alcança a pé em ${m} minutos, a ${kmh} km/h (${metres} m), por ruas,
+          caminhos e escadas mapeados no OpenStreetMap, a partir das plataformas da estação. Os residentes vêm da grelha
+          dos censos: de cada célula conta a parte que fica dentro da área.`,
+        byCar: "De carro",
+        driveHero: (m) => `residentes a ${m} min de carro`,
+        driveArea: "Área abrangida",
+        driveNote: (m, share, signal, junction, reach) => `Zona a partir da qual se chega de carro à estação em ${m} minutos
+          (contorno a tracejado), pelas vias mapeadas no OpenStreetMap: velocidades típicas de cada tipo de via, ou ${share}%
+          do limite de velocidade quando está mapeado, respeitando os sentidos únicos, com ${signal} s de espera em cada
+          semáforo e ${junction} s nos restantes cruzamentos. Não se conta com o trânsito nem com o tempo para estacionar,
+          por isso, à hora de ponta, a área real é menor. Contam-se as casas a menos de ${reach} m de uma via alcançada.`,
+        planned: (line, opening) =>
+          `${/^Linha \S+$/.test(line.name) ? `${line.name}, ` : ""}${line.ends} · <i>em construção${opening ? `, abertura prevista para ${opening}` : ""}</i>`,
+        underConstruction: "em construção",
+        nets: { Metro: "Metro", Trains: "Comboios" },
+        frequency: "Frequência",
+        noTimetable: (names) => `Ainda não há horários disponíveis (${names}).`,
+        trainsTotal: (n, net) => `<b>${n}</b> passage${n === "1" ? "m" : "ns"} de ${net.key === "metro" ? "metro" : "comboio"}
+          por hora nesta estação à hora de ponta dos dias úteis, nos dois sentidos`,
+        all: "Todas",
+        periods: { Peak: "Ponta", Midday: "Meio do dia", Evening: "Noite", Sat: "Sáb", Sun: "Dom" },
+        hours: (h) => h.replace(/(\d+):(\d\d)/g, (_, hh, mm) => (mm === "00" ? `${hh}h` : `${hh}h${mm}`)),
+        days: { monday: "Dias úteis", saturday: "Sábados", sunday: "Domingos e feriados" },
+        freqNote: (weekday, weekend, network, from, to) => `Minutos entre passagens em cada sentido. Dias úteis: ${weekday};
+          fins de semana ${weekend}. Fonte: ${network}, horários válidos de ${from} a ${to}.`,
+        toggle: (names, stations, walkPct, m) => `${names}: ${stations} estações · ${walkPct}% dos residentes vivem a ${m} min a pé`,
+        togglePlanned: (p, lines) => `; ${p}% quando abrirem as linhas ${lines.join(" e ")} (a tracejado)`,
+        toggleDrive: (p, m) => `; ${p}% a ${m} min de carro`,
+        anyStation: (p, m) => `${p}% vivem a ${m} min a pé de pelo menos uma estação.`,
+        plannedName: (line) => line.name.match(/^Linha (\S+)$/)?.[1] ?? line.label,
+      },
+    };
+    const LANGS = Object.keys(I18N);
+    function pickLang() {
+      const asked = new URLSearchParams(location.search).get("lang");
+      let saved = null;
+      try { saved = localStorage.getItem("lang"); } catch {}
+      const browser = (navigator.languages ?? [navigator.language]).map((l) => l.slice(0, 2).toLowerCase())
+        .find((l) => LANGS.includes(l));
+      return [asked, saved, browser].find((l) => LANGS.includes(l)) ?? "en";
+    }
+    let lang = pickLang();
+    const t = (key, ...args) => {
+      const v = I18N[lang][key] ?? I18N.en[key];
+      return typeof v === "function" ? v(...args) : v;
+    };
+    let fmtInt, fmt1;
+    function setFormats() {
+      fmtInt = new Intl.NumberFormat(t("locale"), { maximumFractionDigits: 0 });
+      fmt1 = new Intl.NumberFormat(t("locale"), { maximumFractionDigits: 1 });
+    }
+    setFormats();
+    // Error figures come from the data as "14%" or "4 pts".
+    const errText = (e) => String(e).replace("pts", t("points"));
+    const netLabel = (n) => t("nets")[n.label] ?? n.label;
 
     // Allocated census counts are fractional; show "<1" instead of a misleading zero.
     function count(v) {
@@ -593,37 +810,33 @@
     // from the trains per hour counted in the timetable.
     function trainsBlock(s) {
       const net = transit.networks.find((n) => n.timetable);
-      const t = net?.timetable;
+      const tt = net?.timetable;
       const without = transit.networks.filter((n) => !n.timetable && s.lines.some((r) => lineOf(r).net === n.key));
-      const missing = without.length ? `<p class="note">No timetable for ${without.flatMap((n) => networkNames(n, s.lines)).join(", ")} yet.</p>` : "";
-      if (!t || !s.freq?.all) return without.length && s.lines.length ? `<h2>Frequency</h2>${missing}` : "";
-      const noun = s.nets.length > 1 ? `${net.label.toLowerCase()} trains` : "trains";
+      const missing = without.length ? `<p class="note">${t("noTimetable", without.flatMap((n) => networkNames(n, s.lines)).join(", "))}</p>` : "";
+      if (!tt || !s.freq?.all) return without.length && s.lines.length ? `<h2>${t("frequency")}</h2>${missing}` : "";
       const wait = (tph) => {
         if (!(tph > 0)) return "–";
         const m = 60 / tph;
         return m < 5 ? fmt1.format(m) : fmtInt.format(m);
       };
-      const DAYS = { monday: "Weekdays", saturday: "Saturdays", sunday: "Sundays and holidays" };
-      const head = t.periods.map((p) => `<th title="${DAYS[p.day]} ${p.hours}">${p.label}</th>`).join("");
+      const period = (p) => t("periods")[p.label] ?? p.label;
+      const head = tt.periods.map((p) => `<th title="${t("days")[p.day]} ${t("hours", p.hours)}">${period(p)}</th>`).join("");
       const refs = Object.keys(s.freq).filter((r) => r !== "all").sort();
       const row = (label, values, cls = "") => `<tr class="${cls}"><th>${label}</th>${values.map((v) => `<td>${wait(v)}</td>`).join("")}</tr>`;
-      const weekday = t.periods.filter((p) => p.day === "monday").map((p) => `${p.label.toLowerCase()} ${p.hours}`).join(", ");
-      const weekend = [...new Set(t.periods.filter((p) => p.day !== "monday").map((p) => p.hours))].join(", ");
-      const date = (d) => new Date(d).toLocaleDateString("en-GB", { day: "numeric", month: "short", year: "numeric" });
+      const weekday = tt.periods.filter((p) => p.day === "monday").map((p) => `${period(p).toLowerCase()} ${t("hours", p.hours)}`).join(", ");
+      const weekend = [...new Set(tt.periods.filter((p) => p.day !== "monday").map((p) => t("hours", p.hours)))].join(", ");
+      const date = (d) => new Date(d).toLocaleDateString(t("locale"), { day: "numeric", month: t("dateMonth"), year: "numeric" });
       return `
-        <h2>Frequency</h2>
-        <p class="trains-total"><b>${fmtInt.format(s.freq.all[0])}</b> ${noun} an hour stop here at weekday peak, both directions</p>
+        <h2>${t("frequency")}</h2>
+        <p class="trains-total">${t("trainsTotal", fmtInt.format(s.freq.all[0]), net, s.nets.length > 1)}</p>
         <table class="freq">
           <thead><tr><th></th>${head}</tr></thead>
           <tbody>
             ${refs.map((r) => row(badge(r), s.freq[r])).join("")}
-            ${refs.length > 1 ? row("All", s.freq.all.map((v) => v / 2), "all") : ""}
+            ${refs.length > 1 ? row(t("all"), s.freq.all.map((v) => v / 2), "all") : ""}
           </tbody>
         </table>
-        <p class="note">
-          Minutes between trains in each direction. Weekdays: ${weekday}; weekends ${weekend}.
-          From ${net.network}'s timetable for ${date(t.from)} – ${date(t.to)}.
-        </p>${missing}`;
+        <p class="note">${t("freqNote", weekday, weekend, net.network, date(tt.from), date(tt.to))}</p>${missing}`;
     }
 
     function showStation(i) {
@@ -631,10 +844,7 @@
       const w = transit.walk;
       const item = (ref) => {
         const line = lineOf(ref);
-        const word = line.name.match(/^Linha (\S+)$/)?.[1];
-        const label = line.planned
-          ? `${word ? `${word} line, ` : ""}${line.ends} · <i>under construction${line.opening ? `, opening ${line.opening}` : ""}</i>`
-          : line.ends;
+        const label = line.planned ? t("planned", line, line.opening) : line.ends;
         return `<li>${badge(ref)} <span>${label}</span></li>`;
       };
       // Lines grouped by network: "Metro", "Trains (CP Porto)".
@@ -642,25 +852,19 @@
         const refs = [...s.lines, ...s.planned].filter((r) => lineOf(r).net === n.key);
         if (!refs.length) return "";
         const names = networkNames(n, refs).join(", ");
-        const title = names.includes(n.label) ? n.label : `${n.label} (${names})`;
+        const title = names.includes(n.label) ? netLabel(n) : `${netLabel(n)} (${names})`;
         return `<h2>${title}</h2><ul class="line-list">${refs.map(item).join("")}</ul>`;
       }).join("");
       const future = s.lines.length === 0;
       document.getElementById("panel-body").innerHTML = `
         <div class="station-name">${s.name}</div>
-        ${future ? `<p class="note" style="margin:-4px 0 8px">Future station, not open yet.${s.approx
-          ? " Location approximate: OpenStreetMap does not map it yet, so it is placed on the line by its described location."
-          : ""}</p>` : ""}
-        <div class="hero">${fmtInt.format(s.pop)} <small>residents within a ${w.minutes}-min walk</small></div>
+        ${future ? `<p class="note" style="margin:-4px 0 8px">${t("future")}${s.approx ? t("approx") : ""}</p>` : ""}
+        <div class="hero">${fmtInt.format(s.pop)} <small>${t("walkHero", w.minutes)}</small></div>
         <dl class="rows">
-          <dt>Walking area</dt><dd>${fmt1.format(s.km2)} km²</dd>
-          <dt>Density in that area</dt><dd>${s.km2 > 0 ? fmtInt.format(s.pop / s.km2) : "–"} / km²</dd>
+          <dt>${t("walkArea")}</dt><dd>${fmt1.format(s.km2)} km²</dd>
+          <dt>${t("densityThere")}</dt><dd>${s.km2 > 0 ? fmtInt.format(s.pop / s.km2) : "–"} / km²</dd>
         </dl>
-        <p class="note">
-          The area reached on foot in ${w.minutes} minutes at ${fmt1.format(w.kmh)} km/h (${fmtInt.format(w.metres)} m)
-          along streets, footpaths and stairs mapped in OpenStreetMap, from the station's platforms.
-          Residents are the census grid's, counting the share of each cell inside the area.
-        </p>
+        <p class="note">${t("walkNote", w.minutes, fmt1.format(w.kmh), fmtInt.format(w.metres))}</p>
         ${driveBlock(s)}
         ${lines}
         ${trainsBlock(s)}
@@ -672,17 +876,11 @@
       if (!s.drive) return "";
       const d = s.drive;
       return `
-        <h2>By car</h2>
-        <div class="hero">${fmtInt.format(d.pop)} <small>residents within a ${d.minutes}-min drive</small></div>
-        <dl class="rows"><dt>Driving area</dt><dd>${fmtInt.format(d.km2)} km²</dd></dl>
-        <p class="note">
-          Where one can drive to the station from in ${d.minutes} minutes (dashed outline), along roads mapped
-          in OpenStreetMap at free-flow speeds: typical speeds by road type, or ${fmtInt.format(100 * transit.drive.maxspeed_share)}%
-          of the speed limit where mapped, one-way streets respected, losing ${transit.drive.signal_s} s at each
-          traffic light and ${transit.drive.junction_s} s at other junctions. Congestion and parking are not counted,
-          so at rush hour the real area is smaller. Homes within ${fmtInt.format(transit.drive.reach_m)} m of a
-          reached road count.
-        </p>`;
+        <h2>${t("byCar")}</h2>
+        <div class="hero">${fmtInt.format(d.pop)} <small>${t("driveHero", d.minutes)}</small></div>
+        <dl class="rows"><dt>${t("driveArea")}</dt><dd>${fmtInt.format(d.km2)} km²</dd></dl>
+        <p class="note">${t("driveNote", d.minutes, fmtInt.format(100 * transit.drive.maxspeed_share),
+          transit.drive.signal_s, transit.drive.junction_s, fmtInt.format(transit.drive.reach_m))}</p>`;
     }
 
     function selectStation(i) {
@@ -711,17 +909,14 @@
     function floorsBlock(c, i) {
       const n = c.apt_floors_n[i];
       if (!n) {
-        return `<p class="note"><b>Average apartment building height:</b> not mapped in OpenStreetMap for this cell.</p>`;
+        return `<p class="note">${t("floorsNone")}</p>`;
       }
-      return `<div class="floors">${fmt1.format(c.apt_floors[i])} floors</div>
-        <p class="note" style="margin-top:2px">Average apartment building height, from ${n} building${n > 1 ? "s" : ""}
-        with floors mapped in OpenStreetMap.</p>`;
+      return `<div class="floors">${t("floorsValue", fmt1.format(c.apt_floors[i]))}</div>
+        <p class="note" style="margin-top:2px">${t("floorsFrom", n)}</p>`;
     }
 
     function buildingHint() {
-      return map.getZoom() < BUILDINGS_MINZOOM
-        ? "Zoom in to see this cell's buildings highlighted."
-        : "This cell's buildings are highlighted (map shapes from OpenStreetMap).";
+      return map.getZoom() < BUILDINGS_MINZOOM ? t("zoomHint") : t("highlighted");
     }
 
     function showCell(i) {
@@ -732,38 +927,38 @@
       const err = data.errors || {};
 
       document.getElementById("panel-body").innerHTML = `
-        <div class="hero">${fmtInt.format(density)} <small>residents / km²</small></div>
+        <div class="hero">${fmtInt.format(density)} <small>${t("perKm2")}</small></div>
         <dl class="rows">
-          <dt>Residents</dt><dd>${fmtInt.format(c.pop[i])}</dd>
-          <dt>Dwellings</dt><dd>${fmtInt.format(c.dwellings[i])}</dd>
-          <dt>Households</dt><dd>${fmtInt.format(c.households[i])}</dd>
-          <dt>Average household size</dt><dd>${c.households[i] > 0 ? fmt1.format(c.pop[i] / c.households[i]) : "–"}</dd>
-          <dt>Cell size</dt><dd>${data.cell} m × ${data.cell} m</dd>
+          <dt>${t("residents")}</dt><dd>${fmtInt.format(c.pop[i])}</dd>
+          <dt>${t("dwellings")}</dt><dd>${fmtInt.format(c.dwellings[i])}</dd>
+          <dt>${t("households")}</dt><dd>${fmtInt.format(c.households[i])}</dd>
+          <dt>${t("hhSize")}</dt><dd>${c.households[i] > 0 ? fmt1.format(c.pop[i] / c.households[i]) : "–"}</dd>
+          <dt>${t("cellSize")}</dt><dd>${data.cell} m × ${data.cell} m</dd>
         </dl>
         <p class="note">
-          Census 2021, spread from census blocks onto the grid using building footprints.
-          ${err.pop ? `Typical error per cell: counts ±${err.pop}${err.hh_size ? `, household size ±${err.hh_size}` : ""}.` : ""}
+          ${t("cellNote")}
+          ${err.pop ? t("cellError", errText(err.pop), err.hh_size && errText(err.hh_size)) : ""}
         </p>
 
-        <h2>Residential buildings</h2>
+        <h2>${t("resBuildings")}</h2>
         <dl class="rows">
-          <dt>Buildings with dwellings</dt><dd>${count(c.res_bldg[i])}</dd>
+          <dt>${t("withDwellings")}</dt><dd>${count(c.res_bldg[i])}</dd>
         </dl>
-        ${splitBar(["Single-family", c.houses[i], "--houses"], ["Apartments", c.apt_bldg[i], "--apts"])}
+        ${splitBar([t("singleFamily"), c.houses[i], "--houses"], [t("apartments"), c.apt_bldg[i], "--apts"])}
         <p class="note">
-          Single-family = built for 1–2 dwellings; apartment building = built for 3 or more (INE).
-          ${err.res_bldg ? `Typical error: count ±${err.res_bldg}, apartment share ±${err.apt_share}.` : ""}
+          ${t("typeNote")}
+          ${err.res_bldg ? t("typeError", errText(err.res_bldg), errText(err.apt_share)) : ""}
         </p>
 
-        <h2>Floors</h2>
-        ${splitBar(["1–2 floors", c.low_rise[i], "--low"], ["3 or more", c.mid_rise[i], "--tall"])}
-        <p class="note">Residential buildings by number of floors (INE).${err.rise_share ? ` Typical error on the share: ±${err.rise_share}.` : ""}</p>
+        <h2>${t("floors")}</h2>
+        ${splitBar([t("lowRise"), c.low_rise[i], "--low"], [t("midRise"), c.mid_rise[i], "--tall"])}
+        <p class="note">${t("floorsNote")}${err.rise_share ? t("floorsError", errText(err.rise_share)) : ""}</p>
         ${floorsBlock(c, i)}
         <p class="note" id="building-hint">${buildingHint()}</p>
         <p class="note">
-          Cell ${c.e[i]}E ${c.n[i]}N (EPSG:3035) ·
+          ${t("cell")} ${c.e[i]}E ${c.n[i]}N (EPSG:3035) ·
           <a href="https://www.openstreetmap.org/?mlat=${lat.toFixed(5)}&mlon=${lon.toFixed(5)}#map=15/${view}" target="_blank" rel="noopener">OSM</a> ·
-          <a href="https://www.google.com/maps/@${lat.toFixed(5)},${lon.toFixed(5)},700m/data=!3m1!1e3" target="_blank" rel="noopener">Satellite</a>
+          <a href="https://www.google.com/maps/@${lat.toFixed(5)},${lon.toFixed(5)},700m/data=!3m1!1e3" target="_blank" rel="noopener">${t("satellite")}</a>
         </p>
       `;
       openPanel();
@@ -787,7 +982,7 @@
       document.getElementById("title").classList.toggle("folded", folded);
       const button = document.getElementById("fold");
       button.setAttribute("aria-expanded", !folded);
-      button.setAttribute("aria-label", folded ? "Show more" : "Show less");
+      button.setAttribute("aria-label", folded ? t("showMore") : t("showLess"));
     }
     document.getElementById("fold").addEventListener("click", () => {
       titleFolded = !document.getElementById("title").classList.contains("folded");
@@ -862,7 +1057,7 @@
       tipFor = hit.id;
       const s = transit.stations[hit.id];
       const labels = (refs) => refs.map((r) => lineOf(r).label).join(" ");
-      const soon = s.planned.length ? `${s.lines.length ? " + " : ""}${labels(s.planned)} under construction` : "";
+      const soon = s.planned.length ? `${s.lines.length ? " + " : ""}${labels(s.planned)} ${t("underConstruction")}` : "";
       tip.setLngLat([s.lon, s.lat]).setHTML(`<b>${s.name}</b> · ${labels(s.lines)}${soon}`).addTo(map);
     });
     map.on("click", (ev) => {
@@ -950,17 +1145,16 @@
       const pct = (v) => Math.round((100 * v) / transit.total_pop);
       const minutes = transit.walk.minutes;
       const rows = transit.networks.map((n) => {
-        const building = transit.lines.filter((l) => l.net === n.key && l.planned)
-          .map((l) => l.name.match(/^Linha (\S+)$/)?.[1] ?? l.label);
+        const building = transit.lines.filter((l) => l.net === n.key && l.planned).map((l) => t("plannedName", l));
         const extra = transit.lines.filter((l) => l.net === n.key && l.network).map((l) => `${l.network} (${l.label})`);
-        const text = `${[n.network, ...extra].join(", ")}: ${n.stations} stations · ${pct(n.covered_pop)}% of residents live within a ${minutes}-min walk` +
-          (building.length && n.covered_pop_planned ? `; ${pct(n.covered_pop_planned)}% once the ${building.join(" and ")} lines (dashed) open` : "") +
-          (n.drive_minutes ? `; ${pct(n.drive_covered_pop)}% within a ${n.drive_minutes}-min drive` : "");
+        const text = t("toggle", [n.network, ...extra].join(", "), n.stations, pct(n.covered_pop), minutes) +
+          (building.length && n.covered_pop_planned ? t("togglePlanned", pct(n.covered_pop_planned), building) : "") +
+          (n.drive_minutes ? t("toggleDrive", pct(n.drive_covered_pop), n.drive_minutes) : "");
         const style = transit.tracks.features.some((f) => f.properties.net === n.key && f.properties.rail) ? "rail" : "colours";
         return `<label><input type="checkbox" data-net="${n.key}" ${shown.has(n.key) ? "checked" : ""}>
           <i class="swatch ${style}"></i><span>${text}</span></label>`;
       });
-      if (transit.networks.length > 1) rows.push(`<p>${pct(transit.covered_pop)}% live within a ${minutes}-min walk of any station.</p>`);
+      if (transit.networks.length > 1) rows.push(`<p>${t("anyStation", pct(transit.covered_pop), minutes)}</p>`);
       document.getElementById("transit-toggles").innerHTML = rows.join("");
     }
 
@@ -981,21 +1175,67 @@
       })
       .catch(() => {});
 
-    renderLegend();
+    // Text that depends on the grid: its name, cell size and totals, or the load error.
+    let loadError = null;
+    function renderGridText() {
+      const title = document.getElementById("region"), subtitle = document.getElementById("subtitle");
+      const status = document.getElementById("status");
+      if (loadError) {
+        status.textContent = t("loadError", `data/${REGION}.js`, loadError);
+      } else if (!data) {
+        status.textContent = t("loading");
+      } else {
+        title.textContent = data.region;
+        subtitle.textContent = t("subtitle", data.cell);
+        const total = data.columns.pop.reduce((a, b) => a + b, 0);
+        status.textContent = t("status", fmtInt.format(total), fmtInt.format(data.count));
+        return;
+      }
+      title.textContent = t("heading");
+      subtitle.textContent = t("subtitleShort");
+    }
+
+    // Switching language re-renders all text in place, keeping the selection and view.
+    function applyLang() {
+      document.documentElement.lang = t("locale").startsWith("pt") ? "pt-PT" : "en";
+      document.title = t("title");
+      setFormats();
+      document.getElementById("coffee-text").textContent = t("coffee");
+      document.getElementById("credits").innerHTML = t("credits");
+      document.getElementById("lang").setAttribute("aria-label", t("language"));
+      for (const b of document.querySelectorAll("#lang button")) b.setAttribute("aria-pressed", b.dataset.lang === lang);
+      document.getElementById("grip").setAttribute("aria-label", t("showMoreDetails"));
+      document.getElementById("close").setAttribute("aria-label", t("close"));
+      foldTitle(document.getElementById("title").classList.contains("folded"));
+      renderLegend();
+      renderGridText();
+      if (transit) renderToggles();
+      if (panel.hidden) return;
+      const expanded = panel.classList.contains("expanded"), scroll = document.getElementById("panel-body").scrollTop;
+      if (selected !== null) showCell(selected);
+      else if (station !== null) showStation(station);
+      expandPanel(expanded);
+      document.getElementById("panel-body").scrollTop = scroll;
+    }
+    document.getElementById("lang").addEventListener("click", (ev) => {
+      const next = ev.target.closest("button")?.dataset.lang;
+      if (!next || next === lang) return;
+      lang = next;
+      try { localStorage.setItem("lang", lang); } catch {}
+      applyLang();
+    });
+
+    applyLang();
     loadData()
       .then((json) => {
         data = json;
-        document.getElementById("region").textContent = data.region;
-        document.getElementById("subtitle").textContent =
-          `Residents per km² · ${data.cell} m × ${data.cell} m cells · Census 2021`;
-        const total = data.columns.pop.reduce((a, b) => a + b, 0);
-        document.getElementById("status").textContent =
-          `${fmtInt.format(total)} residents in ${fmtInt.format(data.count)} cells · click a cell for details`;
+        renderGridText();
         if (!startedWithView) map.fitBounds([data.bounds.slice(0, 2), data.bounds.slice(2)], { padding: 20, duration: 0 });
         if (styleReady) addLayers();
       })
       .catch((err) => {
-        document.getElementById("status").textContent = `Could not load data/${REGION}.js (${err.message}). Run the pipeline first.`;
+        loadError = err.message;
+        renderGridText();
       });
   </script>
 </body>
