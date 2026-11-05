@@ -13,11 +13,12 @@ station serves.
   narrow-gauge **Linha do Vouga** (Espinho – Oliveira de Azeméis) are drawn as a railway (dark line,
   white dashes). Each network has its own toggle in the title card.
 - **Click a station** to fade everything outside the area within a 10-minute walk of it, and see
-  the residents in that area, its lines and, for the metro, how often trains call.
+  the residents in that area, its lines and, for the metro, how often trains call. A train
+  station also shows the area within a 10-minute drive of it (dashed), and the residents there.
 
 **Open `index.html`.** It is a static page that works straight from disk or any static host. It loads
-the grid from `data/amp.js` and the rail layer from `data/amp_transit.js` (scripts, not fetched JSON,
-so no server is needed). Map tiles (CARTO), MapLibre GL and proj4 come from CDNs. To publish,
+the grid from `data/amp.js` and the rail layer from `data/amp_transit.js`, then the train stations'
+driving areas from `data/amp_drive.js` (scripts, not fetched JSON, so no server is needed). Map tiles (CARTO), MapLibre GL and proj4 come from CDNs. To publish,
 upload `index.html` and `data/*.js`, not `data/raw/`.
 
 ## Data sources
@@ -204,6 +205,31 @@ official ones exist. The opening year comes from OSM's `opening_date` where tagg
 No time is added for stairs, slopes, crossings or reaching the platform, so in steep parts of Porto
 10 minutes is generous.
 
+### Driving areas (train stations)
+
+For networks with `drive_minutes` in `regions.py` (the trains: 10), each open station also gets the
+area from which one can drive to it within that time, as for a park-and-ride.
+
+- **Network:** OSM roads cars can use: motorway to service road, living streets; not
+  `access`/`motor_vehicle`/`motorcar` = no or private. One-way streets, roundabouts and motorways
+  are driven one way only, and the search runs *towards* the station (edges reversed).
+- **Speeds:** free-flow, from OSRM's car profile: motorway 90 km/h, trunk 85, primary 65,
+  secondary 55, tertiary 40, residential and unclassified 25, service 15, living street 10 (links
+  slower); where `maxspeed` is mapped, 80% of it (`PT:urban` = 50, `PT:rural` = 90).
+- **Junctions:** 10 s lost at each traffic light (`highway=traffic_signals`: roughly the average
+  wait when about half of cars meet a red) and 3 s at other junctions where three or more roads meet
+  (driveways and car-park lanes aside); none at motorway interchanges, which are grade-separated.
+  OSM has no signal timings, so both are estimates (`SIGNAL_S`, `JUNCTION_S`).
+- **End:** the drivable roads within 80 m of the station's stops, other than motorways and trunk
+  roads; no time for parking or walking to the platform.
+- **Area:** reached roads (including the reached part of partly driven ones) widened by 50 m, with
+  enclosed gaps under 25 ha filled, simplified to 40 m. Motorways and trunk roads don't reach the homes
+  beside them: you can't get on or off there.
+- **Coverage:** 66% of AMP residents live within a 10-minute drive of a train station.
+
+No congestion is counted, so this is the area on a quiet road: at rush hour, especially into Porto,
+the real one is much smaller.
+
 ### Frequencies
 
 From Metro do Porto's GTFS feed (no CP timetable yet). For each station and period, the trains
@@ -260,10 +286,10 @@ uv run python pipeline/fetch_census.py amp      # census subsections   -> data/r
 uv run python pipeline/extract_osm.py amp       # OSM buildings, areas -> data/raw/amp/osm_*.gpkg
 uv run python pipeline/fetch_overture.py amp    # ML footprints        -> data/raw/amp/overture_buildings.gpkg
 uv run python pipeline/build_grid.py amp        # population grid      -> data/amp.js
-uv run python pipeline/build_transit.py amp     # rail layer           -> data/amp_transit.js (needs data/amp.js)
+uv run python pipeline/build_transit.py amp     # rail layer           -> data/amp_transit.js, amp_drive.js (needs data/amp.js)
 ```
 
-`build_grid.py` takes about half a minute and `build_transit.py` under a minute; each prints the
+`build_grid.py` takes about half a minute and `build_transit.py` about five minutes (mostly the driving areas); each prints the
 census totals or coverage it produced, to check against.
 
 Not used yet: `pipeline/fetch_lidar.py` downloads DGT LiDAR surface and terrain models (2 m) for
@@ -278,7 +304,7 @@ about 4.4 GB for the AMP (`--dry-run` lists the tiles without downloading).
 | `pipeline/regions.py` | regions: name, census `where` clause, bounding box, rail networks (`transit`), linked stations (`interchanges`), lines under construction (`planned`). An `aml` entry for Lisbon is defined but not yet built. |
 | `pipeline/build_grid.py` | `CELL` (cell size), `ERRORS`, `FLOOR_HEIGHT_M`, the building rules (`NOT_A_DWELLING`, `COMMERCIAL`, `INDUSTRIAL`, `PUBLIC`, `NOT_A_HOME_NAME`, `NOT_A_HOME_TAGS`…) |
 | `pipeline/extract_osm.py` | `NONRES_AREAS`, the non-residential areas |
-| `pipeline/build_transit.py` | `WALK_MINUTES`, `WALK_KMH`, `REACH_M`, `SNAP_M`, `INTERCHANGE_M`, `PERIODS`… |
+| `pipeline/build_transit.py` | `WALK_MINUTES`, `WALK_KMH`, `REACH_M`, `SNAP_M`, `INTERCHANGE_M`, `PERIODS`, `DRIVE_KMH`, `MAXSPEED_SHARE`, `SIGNAL_S`, `JUNCTION_S`, `DRIVE_REACH_M`… |
 | `index.html` | density classes (`BREAKS`, `RAMP`), line widths, basemaps; the Google Tag Manager container (`GTM-MW8LDDHQ`) |
 
 ## Files
@@ -287,6 +313,7 @@ about 4.4 GB for the AMP (`--dry-run` lists the tiles without downloading).
 index.html                  the map page (HTML, CSS and JS in one file)
 data/amp.js                 the grid: cell columns (window.GRID_DATA)
 data/amp_transit.js         lines, stations, walking areas, frequencies (window.TRANSIT_DATA)
+data/amp_drive.js           train stations' driving areas, loaded after the map (window.DRIVE_DATA)
 data/raw/                   downloads and intermediate files (not published, not in git)
 pipeline/regions.py         region and network configuration
 pipeline/fetch_census.py    INE BGRI 2021 subsections
@@ -307,5 +334,7 @@ pipeline/fetch_lidar.py     DGT LiDAR tiles (not used yet)
 - **Single cells** are estimates: use the error table above, and prefer patterns over individual
   cells, especially at the edge of large subsections.
 - **Walking areas** ignore slopes, stairs and waiting at crossings, and depend on OSM footpaths.
+- **Driving areas** assume no congestion, and junction delays are estimates, so they overstate how far
+  one gets at peak times.
 - **Frequencies** are from a timetable, not real running, and only for the metro.
 - **Rosa and Rubi:** colours are provisional and three Rubi stations are placed approximately.

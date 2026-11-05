@@ -257,6 +257,7 @@
 
     let data; // { columns: { e, n, pop }, count, cell, bounds, region }
     let transit = null; // data/<region>_transit.js (pipeline/build_transit.py), when built
+    let drives = null; // data/<region>_drive.js: {station name: driving area}, loaded after the rest
     let selected = null;
     let station = null; // index into transit.stations
     // isStyleLoaded() is false while tiles load, so track "style.load" ourselves.
@@ -386,6 +387,9 @@
     const isRoad = (l) => ["roads", "transportation"].includes(l["source-layer"]);
     const isBuilding = (l) => ["buildings", "building"].includes(l["source-layer"]);
     const EMPTY = { type: "FeatureCollection", features: [] };
+    // Fade outside a selected station's walking area; with a driving area, two lighter
+    // fades that stack to about the same beyond it (1 - 0.6² ≈ 0.65).
+    const WALK_FADE = 0.65, DRIVE_FADE = 0.4;
     const BUILDINGS_MINZOOM = 13; // the basemap only carries building shapes from here
 
     // Copies the basemap's building shapes whose centre falls inside the selected cell
@@ -457,10 +461,16 @@
       const layers = map.getStyle().layers;
       const labelsStart = layers[layers.findLastIndex((l) => l.type !== "symbol") + 1]?.id;
 
+      // Driving area (train stations): faded less than beyond it, with a dashed outline.
+      map.addSource("drive", { type: "geojson", data: EMPTY });
+      map.addLayer({ id: "drive-mask", type: "fill", source: "drive", filter: ["==", ["get", "part"], "mask"],
+        paint: { "fill-color": surface, "fill-opacity": DRIVE_FADE } }, labelsStart);
+      map.addLayer({ id: "drive-line", type: "line", source: "drive", filter: ["==", ["get", "part"], "area"],
+        paint: { "line-color": ink, "line-width": 1.5, "line-dasharray": [3, 2] } }, labelsStart);
       // Walking area: everything outside it is faded, and it gets an outline.
       map.addSource("walk", { type: "geojson", data: EMPTY });
       map.addLayer({ id: "walk-mask", type: "fill", source: "walk", filter: ["==", ["get", "part"], "mask"],
-        paint: { "fill-color": surface, "fill-opacity": 0.65 } }, labelsStart);
+        paint: { "fill-color": surface, "fill-opacity": WALK_FADE } }, labelsStart);
       map.addLayer({ id: "walk-line", type: "line", source: "walk", filter: ["==", ["get", "part"], "area"],
         paint: { "line-color": ink, "line-width": 2 } }, labelsStart);
 
@@ -536,22 +546,31 @@
       for (const source of ["stations", "station-links"]) map.setFeatureState({ source, id: i }, { selected });
     }
 
-    function showWalk(i) {
-      markStation(i, true);
-      const walk = transit.stations[i].walk;
-      // Mask = the world with the walking area cut out. Ring winding tells MapLibre
-      // which rings are holes: the area's outer rings are reversed to become holes,
-      // and its own holes are reversed to become islands of mask.
+    // Mask = the world with the area cut out. Ring winding tells MapLibre which rings
+    // are holes: the area's outer rings are reversed to become holes, and its own holes
+    // are reversed to become islands of mask.
+    function masked(area) {
       const world = [[-180, -85], [180, -85], [180, 85], [-180, 85], [-180, -85]];
       const rev = (ring) => ring.slice().reverse();
-      const mask = [[world, ...walk.map((p) => rev(p[0]))], ...walk.flatMap((p) => p.slice(1).map((h) => [rev(h)]))];
-      map.getSource("walk").setData({
+      const mask = [[world, ...area.map((p) => rev(p[0]))], ...area.flatMap((p) => p.slice(1).map((h) => [rev(h)]))];
+      return {
         type: "FeatureCollection",
         features: [
           { type: "Feature", properties: { part: "mask" }, geometry: { type: "MultiPolygon", coordinates: mask } },
-          { type: "Feature", properties: { part: "area" }, geometry: { type: "MultiPolygon", coordinates: walk } },
+          { type: "Feature", properties: { part: "area" }, geometry: { type: "MultiPolygon", coordinates: area } },
         ],
-      });
+      };
+    }
+    const driveOf = (i) => (transit.stations[i].drive && drives?.[transit.stations[i].name]) || null;
+
+    // The walking area, and for a train station its driving area: the two fades stack, so
+    // beyond the drive is as faded as beyond a walk alone.
+    function showWalk(i) {
+      markStation(i, true);
+      const drive = driveOf(i);
+      map.getSource("walk").setData(masked(transit.stations[i].walk));
+      map.getSource("drive").setData(drive ? masked(drive) : EMPTY);
+      map.setPaintProperty("walk-mask", "fill-opacity", drive ? DRIVE_FADE : WALK_FADE);
     }
 
     // Badge text: dark on light line colours (Line D yellow), white otherwise.
@@ -642,10 +661,28 @@
           along streets, footpaths and stairs mapped in OpenStreetMap, from the station's platforms.
           Residents are the census grid's, counting the share of each cell inside the area.
         </p>
+        ${driveBlock(s)}
         ${lines}
         ${trainsBlock(s)}
       `;
       openPanel();
+    }
+
+    function driveBlock(s) {
+      if (!s.drive) return "";
+      const d = s.drive;
+      return `
+        <h2>By car</h2>
+        <div class="hero">${fmtInt.format(d.pop)} <small>residents within a ${d.minutes}-min drive</small></div>
+        <dl class="rows"><dt>Driving area</dt><dd>${fmtInt.format(d.km2)} km²</dd></dl>
+        <p class="note">
+          Where one can drive to the station from in ${d.minutes} minutes (dashed outline), along roads mapped
+          in OpenStreetMap at free-flow speeds: typical speeds by road type, or ${fmtInt.format(100 * transit.drive.maxspeed_share)}%
+          of the speed limit where mapped, one-way streets respected, losing ${transit.drive.signal_s} s at each
+          traffic light and ${transit.drive.junction_s} s at other junctions. Congestion and parking are not counted,
+          so at rush hour the real area is smaller. Homes within ${fmtInt.format(transit.drive.reach_m)} m of a
+          reached road count.
+        </p>`;
     }
 
     function selectStation(i) {
@@ -653,12 +690,13 @@
       station = i;
       if (i === null) {
         map.getSource("walk")?.setData(EMPTY);
+        map.getSource("drive")?.setData(EMPTY);
         return;
       }
       select(null);
       showWalk(i);
       showStation(i);
-      const [w, s, e, n] = transit.stations[i].walk.flat(2).reduce(
+      const [w, s, e, n] = (driveOf(i) ?? transit.stations[i].walk).flat(2).reduce(
         ([w, s, e, n], [x, y]) => [Math.min(w, x), Math.min(s, y), Math.max(e, x), Math.max(n, y)],
         [Infinity, Infinity, -Infinity, -Infinity]);
       const free = clearArea();
@@ -916,7 +954,8 @@
           .map((l) => l.name.match(/^Linha (\S+)$/)?.[1] ?? l.label);
         const extra = transit.lines.filter((l) => l.net === n.key && l.network).map((l) => `${l.network} (${l.label})`);
         const text = `${[n.network, ...extra].join(", ")}: ${n.stations} stations · ${pct(n.covered_pop)}% of residents live within a ${minutes}-min walk` +
-          (building.length && n.covered_pop_planned ? `; ${pct(n.covered_pop_planned)}% once the ${building.join(" and ")} lines (dashed) open` : "");
+          (building.length && n.covered_pop_planned ? `; ${pct(n.covered_pop_planned)}% once the ${building.join(" and ")} lines (dashed) open` : "") +
+          (n.drive_minutes ? `; ${pct(n.drive_covered_pop)}% within a ${n.drive_minutes}-min drive` : "");
         const style = transit.tracks.features.some((f) => f.properties.net === n.key && f.properties.rail) ? "rail" : "colours";
         return `<label><input type="checkbox" data-net="${n.key}" ${shown.has(n.key) ? "checked" : ""}>
           <i class="swatch ${style}"></i><span>${text}</span></label>`;
@@ -932,6 +971,13 @@
         for (const n of transit.networks) shown.add(n.key);
         renderToggles();
         addTransitLayers();
+        // Driving areas are big: load them once the map is up, and show the open station's.
+        if (transit.networks.some((n) => n.drive_minutes)) {
+          loadScript(`data/${REGION}_drive.js`, "DRIVE_DATA").then((json) => {
+            drives = json;
+            if (station !== null && map.getSource("drive")) selectStation(station);
+          }).catch(() => {});
+        }
       })
       .catch(() => {});
 

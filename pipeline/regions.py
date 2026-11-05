@@ -15,6 +15,7 @@ OSM by its route relations' `network` tag:
   gtfs     optional timetable in data/raw/gtfs/, for frequencies
   include  lines of other OSM networks drawn as part of this one: their route master's
            network and name, and the line's name for the map
+  drive_minutes  optional: each open station also gets the area within this drive of it
   planned  lines under construction: OSM has their track (railway=construction, tagged
            with the line's `name` and the network as `operator`) but no routes yet
 `interchanges` names connected stations whose names differ: {shown name: [station names]}.
@@ -56,6 +57,7 @@ REGIONS = {
                 "routes": ["train"],
                 "badge": "name",
                 "style": "rail",
+                "drive_minutes": 10,
                 # The narrow-gauge Vouga line is mapped as a CP Regional service.
                 "include": [
                     {"network": "CP Regional", "master": "CP Regional: Espinho - Vouga ⇆ Oliveira de Azeméis",

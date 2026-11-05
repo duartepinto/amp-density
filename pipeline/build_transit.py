@@ -21,12 +21,19 @@ from the street centre line) and small enclosed gaps such as block interiors are
 filled. Residents inside are summed from the grid in data/<region>.js, weighted by
 the share of each cell that falls inside.
 
+Driving area (networks with `drive_minutes`, e.g. trains): everywhere one can drive to
+the station from within that time, along OSM roads at free-flow speeds (DRIVE_KMH, or
+80% of a tagged maxspeed), one-way streets respected, plus SIGNAL_S at each traffic light and
+JUNCTION_S at other junctions passed (estimates); no congestion.
+The drive ends on the roads within SNAP_M of the station (not motorways), and homes
+within DRIVE_REACH_M of a reached road count as reached.
+
 Frequencies: trains per hour by period, counted from the operator's GTFS timetables
 (data/raw/gtfs/<file>, per network, optional) at each station, matched by location.
 
 Input:  data/raw/osm/portugal-latest.osm.pbf, data/raw/<region>/bgri2021.gpkg,
         data/<region>.js (run build_grid.py first), data/raw/gtfs/*.zip
-Output: data/<region>_transit.js
+Output: data/<region>_transit.js, data/<region>_drive.js (driving areas, loaded later)
 
 Usage: uv run python pipeline/build_transit.py amp
 """
@@ -75,6 +82,22 @@ PERIODS = [
 ]
 GTFS_MATCH_M = 300  # a GTFS stop belongs to the station within this distance
 NOT_WALKABLE = {"motorway", "motorway_link", "construction", "proposed", "raceway", "bus_guideway", "abandoned"}
+# Driving to a station (networks with `drive_minutes`): free-flow speeds in km/h by road
+# class, OSRM's car profile; a tagged maxspeed counts at 80%. Plus time lost at junctions
+# (estimates: no timings are mapped). No congestion.
+DRIVE_KMH = {
+    "motorway": 90, "motorway_link": 45, "trunk": 85, "trunk_link": 40, "primary": 65, "primary_link": 30,
+    "secondary": 55, "secondary_link": 25, "tertiary": 40, "tertiary_link": 20, "unclassified": 25,
+    "residential": 25, "living_street": 10, "service": 15, "road": 25,
+}
+MAXSPEED_SHARE = 0.8
+MAXSPEED_PT = {"PT:urban": 50, "PT:rural": 90, "PT:trunk": 100, "PT:motorway": 120}
+NO_PARKING = {"motorway", "motorway_link", "trunk", "trunk_link"}  # a drive can't start or end here
+SIGNAL_S = 10  # average wait at traffic lights: about half of cars meet a red
+JUNCTION_S = 3  # slowing, turning or giving way where three or more roads meet (service roads aside)
+DRIVE_REACH_M = 50  # homes this far from a reached road count as reached
+DRIVE_FILL_HOLES_M2 = 250_000
+DRIVE_SIMPLIFY_M = 40
 
 to_metric = Transformer.from_crs(4326, METRIC_CRS, always_xy=True)
 to_wgs = Transformer.from_crs(METRIC_CRS, 4326, always_xy=True)
@@ -96,6 +119,31 @@ def walkable(tags) -> bool:
     if highway in ("trunk", "trunk_link"):  # expressways: only with mapped sidewalks
         return tags.get("sidewalk", "no") not in ("no", "none", "separate")
     return highway not in NOT_WALKABLE
+
+
+def drive_speed(tags) -> float | None:
+    """Car speed on a way in km/h, or None where cars can't go."""
+    highway = tags.get("highway")
+    if highway not in DRIVE_KMH or tags.get("area") == "yes":
+        return None
+    if any(tags.get(k) in ("no", "private") for k in ("access", "vehicle", "motor_vehicle", "motorcar")) \
+            and tags.get("motorcar", tags.get("motor_vehicle")) not in ("yes", "destination", "permissive"):
+        return None
+    raw = tags.get("maxspeed", "")
+    limit = MAXSPEED_PT.get(raw) or (float(m.group()) if (m := re.match(r"\d+", raw)) else None)
+    return MAXSPEED_SHARE * limit if limit else DRIVE_KMH[highway]
+
+
+def oneway(tags) -> int:
+    """+1: cars only along the way's drawing order, -1: only against it, 0: both ways."""
+    value = tags.get("oneway")
+    if value in ("yes", "true", "1"):
+        return 1
+    if value == "-1":
+        return -1
+    if value == "no":
+        return 0
+    return 1 if tags.get("junction") in ("roundabout", "circular") or tags.get("highway") in ("motorway", "motorway_link") else 0
 
 
 def read_routes(net: dict) -> list[dict]:
@@ -147,12 +195,14 @@ def read_osm(routes: list[dict], bbox, operators: set[str]) -> dict:
     """From one pass over the extract:
 
     stops: {node id: (name or None, lon, lat)}, tracks: {way id: [(node, lon, lat)]},
-    walk: [nodes], and construction sites of the given operators: building:
+    walk: [nodes], drive: [(nodes, km/h, oneway, parking allowed, service road)], signals: {node ids}, and construction sites of the given operators: building:
     [(way id, name, opening, nodes)] for track, building_stations: [(name, nodes)].
     """
     stop_ids = {n for r in routes for n in r["stops"]}
     track_ids = {w for r in routes for w in r["ways"]}
-    out = {"stops": {}, "tracks": {}, "walk": [], "building": [], "building_stations": []}
+    out = {"stops": {}, "tracks": {}, "walk": [], "drive": [], "building": [], "building_stations": [],
+           "signals": {n.id for n in osmium.FileProcessor(str(PBF), osmium.osm.NODE)
+                       .with_filter(osmium.filter.TagFilter(("highway", "traffic_signals")))}}
     fp = (
         osmium.FileProcessor(str(PBF), osmium.osm.NODE | osmium.osm.WAY)
         .with_locations()
@@ -168,10 +218,14 @@ def read_osm(routes: list[dict], bbox, operators: set[str]) -> dict:
         nodes = lambda: [(n.ref, n.location.lon, n.location.lat) for n in o.nodes if n.location.valid()]
         if o.id in track_ids:
             out["tracks"][o.id] = nodes()
-        if "highway" in t and walkable(t):
+        if "highway" in t:
             way = nodes()
             if any(bbox[0] <= x <= bbox[2] and bbox[1] <= y <= bbox[3] for _, x, y in way):
-                out["walk"].append(way)
+                if walkable(t):
+                    out["walk"].append(way)
+                if kmh := drive_speed(t):
+                    out["drive"].append((way, kmh, oneway(t), t.get("highway") not in NO_PARKING,
+                                         t.get("highway") == "service"))
         if t.get("operator") not in operators:
             continue
         if t.get("construction:railway") == "station" or t.get("construction:public_transport") == "station":
@@ -188,38 +242,68 @@ def region_shape(region: str) -> shapely.Geometry:
     return shapely.union_all(shapely.simplify(sub.geometry.values, 10)).buffer(20).simplify(20)
 
 
-class WalkGraph:
-    def __init__(self, ways: list):
-        index, lon, lat, edges = {}, [], [], []
+class Graph:
+    """Streets as a graph. Walking: ways are (nodes), cost in metres, both directions.
+    Driving: ways are (nodes, km/h, oneway, parking, service), cost in seconds, and edges are
+    reversed, so a search from a station finds where one can drive *to* it from."""
+
+    def __init__(self, ways: list, drive: bool = False, signals: set = frozenset()):
+        index, lon, lat, edges, park = {}, [], [], [], set()
         for way in ways:
+            nodes, kmh, way_dir, parking, service = way if drive else (way, None, 0, True, False)
             prev = None
-            for node, x, y in way:
+            for node, x, y in nodes:
                 i = index.get(node)
                 if i is None:
                     i = index[node] = len(lon)
                     lon.append(x)
                     lat.append(y)
+                if parking:
+                    park.add(i)
                 if prev is not None and prev != i:
-                    edges.append((prev, i))
+                    edges.append((prev, i, kmh or 0, way_dir, service))
                 prev = i
         self.x, self.y = (np.asarray(v) for v in to_metric.transform(lon, lat))
-        a, b = np.array(edges).T
-        length = np.hypot(self.x[a] - self.x[b], self.y[a] - self.y[b])
+        a, b, kmh, way_dir, service = (np.array(v) for v in zip(*edges))
+        cost = np.hypot(self.x[a] - self.x[b], self.y[a] - self.y[b])
+        if drive:
+            cost = cost / (kmh / 3.6)
         self.adj = [[] for _ in range(len(lon))]
-        for i, j, d in zip(a.tolist(), b.tolist(), length.tolist()):
-            self.adj[i].append((j, d))
-            self.adj[j].append((i, d))
-        self.tree = shapely.STRtree(shapely.points(self.x, self.y))
+        for i, j, c, d in zip(a.tolist(), b.tolist(), cost.tolist(), way_dir.tolist()):
+            # adj[i]: the edges into i, which on foot (both ways) are also the edges out of it.
+            if d != 1:  # one can go j -> i
+                self.adj[i].append((j, c))
+            if d != -1:  # i -> j
+                self.adj[j].append((i, c))
+        self.drive = drive
+        self.park = np.zeros(len(lon), dtype=bool)
+        self.park[list(park)] = True
+        # Driving: time lost passing through a node, at lights and junctions (motorway
+        # interchanges are grade-separated, so their nodes cost nothing).
+        self.delay = np.zeros(len(lon))
+        if drive:
+            neighbours = [set() for _ in range(len(lon))]  # along roads, not driveways or car parks
+            for i, j in zip(a[~service].tolist(), b[~service].tolist()):
+                neighbours[i].add(j)
+                neighbours[j].add(i)
+            junction = np.array([len(n) >= 3 for n in neighbours]) & self.park
+            self.delay[junction] = JUNCTION_S
+            lit = [index[n] for n in signals if n in index]
+            self.delay[lit] = SIGNAL_S
+        self.delay = self.delay.tolist()  # read in the search's inner loop
+        self.starts = np.array(sorted(park))
+        self.tree = shapely.STRtree(shapely.points(self.x[self.starts], self.y[self.starts]))
 
     def sources(self, points) -> dict[int, float]:
-        """Graph nodes near the given metric points, with the straight-line walk to them."""
+        """Graph nodes near the given metric points (within SNAP_M, else the nearest) where
+        a trip can start: walking, with the straight-line walk to them; driving, at 0."""
         start: dict[int, float] = {}
         for px, py in points:
             near = self.tree.query(shapely.Point(px, py), predicate="dwithin", distance=SNAP_M)
             if len(near) == 0:
                 near = self.tree.query_nearest(shapely.Point(px, py))
-            for i in near.tolist():
-                d = math.hypot(self.x[i] - px, self.y[i] - py)
+            for i in self.starts[near].tolist():
+                d = 0.0 if self.drive else math.hypot(self.x[i] - px, self.y[i] - py)
                 start[i] = min(start.get(i, math.inf), d)
         return start
 
@@ -232,28 +316,38 @@ class WalkGraph:
             if d > dist[i]:
                 continue
             for j, w in self.adj[i]:
-                nd = d + w
+                nd = d + w + self.delay[j]
                 if nd <= limit and nd < dist.get(j, math.inf):
                     dist[j] = nd
                     heapq.heappush(heap, (nd, j))
         return dist
 
-    def area(self, dist: dict[int, float], limit: float) -> shapely.Geometry:
-        """The reached stretch of every path, widened by REACH_M, small gaps filled."""
-        segments = []
+    def area(self, dist: dict[int, float], limit: float, reach_m=REACH_M, holes_m2=FILL_HOLES_M2,
+             simplify_m=SIMPLIFY_M, quad_segs=4) -> shapely.Geometry:
+        """The reached stretch of every street, widened by reach_m, small gaps filled."""
+        segments, whole = [], set()
         for i, d in dist.items():
             for j, w in self.adj[i]:
+                if not (self.park[i] or self.park[j]):
+                    continue  # motorways and trunk roads pass homes by without reaching them
                 go = min(w, limit - d)
-                if go == w and j in dist and j < i:
-                    continue  # whole edge already added from j
+                if go == w:
+                    if (min(i, j), max(i, j)) in whole:
+                        continue  # whole edge already added from j
+                    whole.add((min(i, j), max(i, j)))
                 t = go / w if w > 0 else 0
                 segments.append([(self.x[i], self.y[i]),
                                  (self.x[i] + t * (self.x[j] - self.x[i]), self.y[i] + t * (self.y[j] - self.y[i]))])
         # Buffering each piece and merging is far faster than buffering one huge MultiLineString.
-        area = shapely.union_all(shapely.buffer(shapely.linestrings(segments), REACH_M, quad_segs=4))
-        polys = [shapely.Polygon(p.exterior, [h for h in p.interiors if shapely.Polygon(h).area >= FILL_HOLES_M2])
+        area = shapely.union_all(shapely.buffer(shapely.linestrings(segments), reach_m, quad_segs=quad_segs))
+        polys = [shapely.Polygon(p.exterior, [h for h in p.interiors if shapely.Polygon(h).area >= holes_m2])
                  for p in getattr(area, "geoms", [area])]
-        return shapely.MultiPolygon(polys).simplify(SIMPLIFY_M)
+        # Simplifying can leave a ring touching itself; repair it, keeping only the polygons.
+        area = shapely.make_valid(shapely.MultiPolygon(polys).simplify(simplify_m))
+        if area.geom_type == "GeometryCollection":
+            area = shapely.MultiPolygon([g for part in area.geoms for g in getattr(part, "geoms", [part])
+                                         if g.geom_type == "Polygon"])
+        return area
 
 
 def orient_ways(route: dict, tracks: dict) -> dict[int, int]:
@@ -472,13 +566,13 @@ def residents(area_metric: shapely.Geometry, cells, pop, tree) -> float:
     return float((pop[hit] * share).sum())
 
 
-def lonlat_rings(geom: shapely.Geometry) -> list:
+def lonlat_rings(geom: shapely.Geometry, decimals: int = 5) -> list:
     """MultiPolygon as GeoJSON coordinates, exteriors counter-clockwise."""
     out = []
     for p in getattr(geom, "geoms", [geom]):
         p = shapely.orient_polygons(p)
         rings = [p.exterior, *p.interiors]
-        out.append([[[round(x, 5), round(y, 5)] for x, y in zip(*to_wgs.transform(*np.asarray(r.coords).T))]
+        out.append([[[round(x, decimals), round(y, decimals)] for x, y in zip(*to_wgs.transform(*np.asarray(r.coords).T))]
                     for r in rings])
     return out
 
@@ -555,17 +649,31 @@ def main(region: str) -> None:
     lon, lat = to_wgs.transform(allpts[:, 0], allpts[:, 1])
     pad = 0.03  # degrees, comfortably more than the walk
     box = (min(lon) - pad, min(lat) - pad, max(lon) + pad, max(lat) + pad)
-    graph = WalkGraph([w for w in osm["walk"] if any(box[0] <= x <= box[2] and box[1] <= y <= box[3] for _, x, y in w)])
+    graph = Graph([w for w in osm["walk"] if any(box[0] <= x <= box[2] and box[1] <= y <= box[3] for _, x, y in w)])
     print(f"{len(stops)} stop positions, {len(tracks)} track ways, walking graph of {len(graph.adj)} nodes")
+    # Driving areas, for the networks with `drive_minutes`, over every road in the region's box.
+    drive_min = {net["key"]: net["drive_minutes"] for net in nets if net.get("drive_minutes")}
+    roads = Graph(osm["drive"], drive=True, signals=osm["signals"]) if drive_min else None
+    if roads:
+        print(f"driving graph of {len(roads.adj)} nodes, {sum(d == SIGNAL_S for d in roads.delay)} with traffic lights, "
+              f"{sum(d == JUNCTION_S for d in roads.delay)} other junctions")
+    net_of = {line["ref"]: line["net"] for line in lines}
 
     cells, pop, tree = read_grid(region)
-    stations, areas, points = [], [], []
+    stations, areas, points, drives = [], [], [], []
     for spec in sorted(specs, key=lambda s: s["name"]):
         points.append(spec["points"])
         x, y = spec["points"].T
         area = graph.area(graph.reach(graph.sources(zip(x, y)), WALK_M), WALK_M)
         areas.append(area)
         clon, clat = to_wgs.transform(x.mean(), y.mean())
+        minutes = max((drive_min.get(net_of[r], 0) for r in spec["lines"]), default=0)
+        drive = None
+        if minutes:
+            limit = minutes * 60
+            drive = roads.area(roads.reach(roads.sources(zip(x, y)), limit), limit, DRIVE_REACH_M,
+                               DRIVE_FILL_HOLES_M2, DRIVE_SIMPLIFY_M, quad_segs=2)
+        drives.append(drive)
         stations.append({
             "name": spec["name"],
             "lines": spec["lines"],
@@ -580,16 +688,21 @@ def main(region: str) -> None:
             **({"parts": [[*(round(v, 5) for v in to_wgs.transform(*xy)), int(future)]
                           for xy, future in sorted(spec["parts"], key=lambda p: p[1])]}
                if len(spec["parts"]) > 1 else {}),
+            **({"drive": {"minutes": minutes, "pop": round(residents(drive, cells, pop, tree)),
+                          "km2": round(drive.area / 1e6, 1)}} if drive else {}),
         })
 
     networks = []
-    net_of = {line["ref"]: line["net"] for line in lines}
     for net in nets:
         key = net["key"]
         open_ = [a for s, a in zip(stations, areas) if any(net_of[r] == key for r in s["lines"])]
         soon = [a for s, a in zip(stations, areas) if any(net_of[r] == key for r in s["lines"] + s["planned"])]
         info = {"key": key, "label": net["label"], "network": net["network"], "stations": len(open_),
                 "covered_pop": round(residents(shapely.union_all(open_), cells, pop, tree))}
+        if key in drive_min:
+            by_car = [d for s, d in zip(stations, drives) if d and any(net_of[r] == key for r in s["lines"])]
+            info["drive_minutes"] = drive_min[key]
+            info["drive_covered_pop"] = round(residents(shapely.union_all(by_car), cells, pop, tree))
         if len(soon) > len(open_):
             info["covered_pop_planned"] = round(residents(shapely.union_all(soon), cells, pop, tree))
         gtfs = ROOT / "data/raw/gtfs" / net.get("gtfs", "-")
@@ -601,12 +714,16 @@ def main(region: str) -> None:
         share = 100 * info["covered_pop"] / pop.sum()
         print(f"{net['network']}: {sum(line['net'] == key for line in lines)} lines, {len(open_)} stations open, "
               f"{info['covered_pop']} residents ({share:.1f}%) within {WALK_MINUTES} min"
-              + (f", {info['covered_pop_planned']} with lines under construction" if "covered_pop_planned" in info else ""))
+              + (f", {info['covered_pop_planned']} with lines under construction" if "covered_pop_planned" in info else "")
+              + (f"; {info['drive_covered_pop']} ({100 * info['drive_covered_pop'] / pop.sum():.1f}%) within a "
+                 f"{info['drive_minutes']}-min drive" if "drive_minutes" in info else ""))
     every = residents(shapely.union_all([a for s, a in zip(stations, areas) if s["lines"]]), cells, pop, tree)
 
     out = ROOT / "data" / f"{region}_transit.js"
     out.write_text("window.TRANSIT_DATA = " + json.dumps({
         "walk": {"minutes": WALK_MINUTES, "kmh": WALK_KMH, "metres": round(WALK_M)},
+        "drive": {"maxspeed_share": MAXSPEED_SHARE, "reach_m": DRIVE_REACH_M,
+                  "signal_s": SIGNAL_S, "junction_s": JUNCTION_S},
         "total_pop": round(pop.sum()),
         "covered_pop": round(every),
         "networks": networks,
@@ -616,6 +733,13 @@ def main(region: str) -> None:
     }, ensure_ascii=False, separators=(",", ":")) + ";\n")
     print(f"{len(stations)} stations; {every:.0f} residents ({100 * every / pop.sum():.1f}%) within "
           f"{WALK_MINUTES} min of any -> {out} ({out.stat().st_size / 1e6:.2f} MB)")
+    # Driving areas are large, so they go in their own file, which the page loads after the rest.
+    if roads:
+        out = ROOT / "data" / f"{region}_drive.js"
+        out.write_text("window.DRIVE_DATA = " + json.dumps(
+            {s["name"]: lonlat_rings(d, 4) for s, d in zip(stations, drives) if d},
+            ensure_ascii=False, separators=(",", ":")) + ";\n")
+        print(f"{sum(d is not None for d in drives)} driving areas -> {out} ({out.stat().st_size / 1e6:.2f} MB)")
 
 
 if __name__ == "__main__":
