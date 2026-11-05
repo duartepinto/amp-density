@@ -279,7 +279,7 @@ about 4.4 GB for the AMP (`--dry-run` lists the tiles without downloading).
 | `pipeline/build_grid.py` | `CELL` (cell size), `ERRORS`, `FLOOR_HEIGHT_M`, the building rules (`NOT_A_DWELLING`, `COMMERCIAL`, `INDUSTRIAL`, `PUBLIC`, `NOT_A_HOME_NAME`, `NOT_A_HOME_TAGS`…) |
 | `pipeline/extract_osm.py` | `NONRES_AREAS`, the non-residential areas |
 | `pipeline/build_transit.py` | `WALK_MINUTES`, `WALK_KMH`, `REACH_M`, `SNAP_M`, `INTERCHANGE_M`, `PERIODS`… |
-| `index.html` | density classes (`BREAKS`, `RAMP`), line widths, basemaps |
+| `index.html` | density classes (`BREAKS`, `RAMP`), line widths, basemaps; the Google Tag Manager container (`GTM-MW8LDDHQ`) |
 
 ## Files
 

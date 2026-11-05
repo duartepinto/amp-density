@@ -5,6 +5,13 @@
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>Porto Density Grid</title>
   <link rel="stylesheet" href="https://unpkg.com/maplibre-gl@4.7.1/dist/maplibre-gl.css">
+  <!-- Google Tag Manager -->
+  <script async src="https://www.googletagmanager.com/gtm.js?id=GTM-MW8LDDHQ"></script>
+  <script>
+    window.dataLayer = window.dataLayer || [];
+    function gtag(){dataLayer.push(arguments);}
+    gtag('js', new Date());
+  </script>
   <style>
     :root {
       --surface: #ffffff;
@@ -121,6 +128,14 @@
     #transit-toggles .swatch.colours { background: linear-gradient(90deg, #3CAEEF 0 33%, #E62621 33% 66%, #8BC63E 66%); }
     #transit-toggles .swatch.rail { background: repeating-linear-gradient(90deg, var(--surface) 0 3px, var(--ink) 3px 7px); border: 1.5px solid var(--ink); }
     #transit-toggles p { margin: 6px 0 0 19px; font-size: 12px; color: var(--muted); }
+    /* Donation link, in the yellow of Buy Me a Coffee */
+    .coffee-button {
+      display: inline-flex; align-items: center; gap: 6px; margin-top: 10px; padding: 5px 12px;
+      border-radius: 999px; background: #FFDD00; color: #000; text-decoration: none;
+      font-size: 12px; font-weight: 600; box-shadow: 0 1px 4px rgb(0 0 0 / 0.15);
+      transition: background 0.2s, transform 0.2s;
+    }
+    .coffee-button:hover { background: #FFE135; transform: translateY(-1px); }
     .station-name { font-size: 20px; font-weight: 650; margin: 0 24px 8px 0; }
     .badge {
       display: inline-flex; align-items: center; justify-content: center; min-width: 20px; height: 20px;
@@ -157,7 +172,7 @@
         border: solid currentColor; border-width: 0 2px 2px 0; transform: translateY(-2px) rotate(225deg);
       }
       #title.folded #fold::before { transform: translateY(-4px) rotate(45deg); }
-      #title.folded #subtitle, #title.folded #status, #title.folded #transit-toggles { display: none; }
+      #title.folded #subtitle, #title.folded #status, #title.folded #transit-toggles, #title.folded .coffee-button { display: none; }
       #title.folded #legend { margin-bottom: 14px; }
       /* Bottom sheet: a short peek at the top of the details, tap or swipe up for the rest. */
       #panel {
@@ -191,6 +206,7 @@
     <div id="legend"></div>
     <p class="muted small" id="status">Loading grid…</p>
     <div id="transit-toggles"></div>
+    <a href="https://coff.ee/duartepinto" target="_blank" rel="noopener" class="coffee-button"><span aria-hidden="true">☕</span> Buy me a coffee</a>
   </header>
 
   <aside class="card" id="panel" hidden>
