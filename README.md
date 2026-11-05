@@ -9,8 +9,9 @@ station serves.
   apartment buildings, 1–2 vs 3+ floors) and the average floors of its apartment buildings. From
   zoom 13 the cell's buildings are highlighted on the map.
 - **Metro do Porto** lines are drawn in their colours, side by side where they share track; the
-  Rosa (G) and Rubi (H) lines under construction are dashed. **CP Porto** suburban trains are drawn
-  as a railway (dark line, white dashes). Each network has its own toggle in the title card.
+  Rosa (G) and Rubi (H) lines under construction are dashed. **CP Porto** suburban trains and the
+  narrow-gauge **Linha do Vouga** (Espinho – Oliveira de Azeméis) are drawn as a railway (dark line,
+  white dashes). Each network has its own toggle in the title card.
 - **Click a station** to fade everything outside the area within a 10-minute walk of it, and see
   the residents in that area, its lines and, for the metro, how often trains call.
 
@@ -139,7 +140,9 @@ misplaced from 21.9% to 19.2% and the residents put in subsections that really h
 ## How the rail layer is made
 
 The networks are configured under `transit` in `pipeline/regions.py`: for the AMP, Metro do Porto
-(light rail) and CP Porto (suburban trains).
+(light rail) and CP Porto (suburban trains), with the Linha do Vouga. OSM maps the Vouga line as
+a CP Regional service, so the train network takes that one route master by name (`include`), and
+the station panel names CP Regional for its stations.
 
 ### Lines
 
@@ -157,10 +160,11 @@ The networks are configured under `transit` in `pipeline/regions.py`: for the AM
 
 - A station is a line's stop positions (route members with a `stop` role) grouped by name; unnamed
   stop positions take the name of the nearest named one within 600 m. Only stations inside the AMP
-  (within 200 m of its edge) are kept: 85 metro, 47 train.
+  (within 200 m of its edge) are kept: 85 metro, 65 train (18 on the Vouga line).
 - **Interchanges.** Stations with the same name (ignoring a "Porto - " prefix) are one station when
   their closest stops are within 250 m — Campanhã, São Bento, General Torres. Further apart they
-  stay separate: Hospital São João (metro and train stops 390 m apart) and Contumil (480 m).
+  stay separate: Hospital São João (metro and train stops 390 m apart), Contumil (480 m), and
+  Espinho-Vouga, its own station 460 m from CP's Espinho, is not linked to it either.
   Connected stations with different names are listed under `interchanges` (CP's Gaia station and
   Rubi's future Devesas station: *Gaia - Devesas*).
 - An interchange keeps a marker at each of its stations, linked by a capsule-shaped connector, the
@@ -195,7 +199,7 @@ official ones exist. The opening year comes from OSM's `opening_date` where tagg
   so they carry the grid's error.
 - **Coverage** in the title card is the union of the walking areas of each network's open stations:
   17% of AMP residents live within a 10-minute walk of a metro station (18% once Rosa and Rubi open),
-  9% of a train station, 23% of either.
+  11% of a train station, 25% of either.
 
 No time is added for stairs, slopes, crossings or reaching the platform, so in steep parts of Porto
 10 minutes is generous.

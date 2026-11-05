@@ -550,6 +550,9 @@
       return `<span class="badge" style="background:${line.colour};color:${light ? "#1a1a19" : "#ffffff"}">${text}</span>`;
     }
     const lineOf = (ref) => transit.lines.find((l) => l.ref === ref);
+    // OSM networks behind a toggle's lines: a line drawn with another network's (the Vouga
+    // line, a CP Regional service, with CP Porto) carries its own.
+    const networkNames = (n, refs) => [...new Set(refs.map(lineOf).filter((l) => l.net === n.key).map((l) => l.network ?? n.network))];
 
     // Minutes between trains in each direction, per line and for all lines together,
     // from the trains per hour counted in the timetable.
@@ -557,7 +560,7 @@
       const net = transit.networks.find((n) => n.timetable);
       const t = net?.timetable;
       const without = transit.networks.filter((n) => !n.timetable && s.lines.some((r) => lineOf(r).net === n.key));
-      const missing = without.length ? `<p class="note">No timetable for ${without.map((n) => n.network).join(", ")} yet.</p>` : "";
+      const missing = without.length ? `<p class="note">No timetable for ${without.flatMap((n) => networkNames(n, s.lines)).join(", ")} yet.</p>` : "";
       if (!t || !s.freq?.all) return without.length && s.lines.length ? `<h2>Frequency</h2>${missing}` : "";
       const noun = s.nets.length > 1 ? `${net.label.toLowerCase()} trains` : "trains";
       const wait = (tph) => {
@@ -603,7 +606,8 @@
       const lines = transit.networks.map((n) => {
         const refs = [...s.lines, ...s.planned].filter((r) => lineOf(r).net === n.key);
         if (!refs.length) return "";
-        const title = n.network.includes(n.label) ? n.label : `${n.label} (${n.network})`;
+        const names = networkNames(n, refs).join(", ");
+        const title = names.includes(n.label) ? n.label : `${n.label} (${names})`;
         return `<h2>${title}</h2><ul class="line-list">${refs.map(item).join("")}</ul>`;
       }).join("");
       const future = s.lines.length === 0;
@@ -894,7 +898,8 @@
       const rows = transit.networks.map((n) => {
         const building = transit.lines.filter((l) => l.net === n.key && l.planned)
           .map((l) => l.name.match(/^Linha (\S+)$/)?.[1] ?? l.label);
-        const text = `${n.network}: ${n.stations} stations · ${pct(n.covered_pop)}% of residents live within a ${minutes}-min walk` +
+        const extra = transit.lines.filter((l) => l.net === n.key && l.network).map((l) => `${l.network} (${l.label})`);
+        const text = `${[n.network, ...extra].join(", ")}: ${n.stations} stations · ${pct(n.covered_pop)}% of residents live within a ${minutes}-min walk` +
           (building.length && n.covered_pop_planned ? `; ${pct(n.covered_pop_planned)}% once the ${building.join(" and ")} lines (dashed) open` : "");
         const style = transit.tracks.features.some((f) => f.properties.net === n.key && f.properties.rail) ? "rail" : "colours";
         return `<label><input type="checkbox" data-net="${n.key}" ${shown.has(n.key) ? "checked" : ""}>

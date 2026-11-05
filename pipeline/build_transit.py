@@ -99,32 +99,48 @@ def walkable(tags) -> bool:
 
 
 def read_routes(net: dict) -> list[dict]:
-    """The network's route relations, each with its line: its route master's ref, else its own."""
+    """The network's route relations, each with its line: its route master's ref, else its own.
+
+    Routes of other networks join when their route master is listed under `include`
+    (only those), named as given there.
+    """
+    include = {(inc["network"], inc["master"]): inc["name"] for inc in net.get("include", [])}
+    networks = {net["network"]} | {n for n, _ in include}
     routes, masters = [], {}
     fp = osmium.FileProcessor(str(PBF), osmium.osm.RELATION).with_filter(
         osmium.filter.TagFilter(("type", "route"), ("type", "route_master")))
     for r in fp:
         t = r.tags
-        if t.get("network") != net["network"] or (t.get("route") or t.get("route_master")) not in net["routes"]:
+        if t.get("network") not in networks or (t.get("route") or t.get("route_master")) not in net["routes"]:
             continue
         if t.get("type") == "route_master":
             for m in r.members:
                 if m.type == "r":
-                    masters[m.ref] = (t.get("ref"), t.get("name", ""))
+                    masters[m.ref] = (t.get("ref"), t.get("name", ""), include.get((t.get("network"), t.get("name"))))
             continue
         routes.append({
             "id": r.id,
+            "network": t.get("network"),
             "ref": t.get("ref", "?"),
             "name": t.get("name", ""),
             "colour": t.get("colour", "#888888"),
             "ways": [m.ref for m in r.members if m.type == "w" and m.role == ""],
             "stops": [m.ref for m in r.members if m.type == "n" and m.role.startswith("stop")],
         })
+    kept = []
     for r in routes:
-        ref, name = masters.get(r["id"], (None, None))
+        ref, name, line_name = masters.get(r["id"], (None, None, None))
+        if r["network"] != net["network"] and not line_name:
+            continue  # another network's route that is not included
         r["line"] = ref or r["ref"]
-        r["master_name"] = name or r["name"]
-    return routes
+        r["master_name"] = line_name or name or r["name"]
+        r["line_name"] = line_name
+        kept.append(r)
+    found = {r["line_name"] for r in kept}
+    for (network, master), name in include.items():
+        if name not in found:
+            print(f"  warning: no {network} route master named {master!r} ({name})")
+    return kept
 
 
 def read_osm(routes: list[dict], bbox, operators: set[str]) -> dict:
@@ -263,7 +279,7 @@ def line_names(route: dict, stops: dict) -> tuple[str, str]:
     names = [bare_name(stops[n][0]) for n in route["stops"] if n in stops and stops[n][0]]
     if len(names) >= 2:
         ends = f"{names[0]} – {names[-1]}"
-    return head.strip(), re.sub(r"\s*(⇒|=>|->)\s*", " – ", ends.strip())
+    return route["line_name"] or head.strip(), re.sub(r"\s*(⇒|=>|->)\s*", " – ", ends.strip())
 
 
 def build_lines(routes: list[dict], tracks: dict, stops: dict, net: dict) -> tuple[list[dict], dict, dict]:
@@ -290,7 +306,8 @@ def build_lines(routes: list[dict], tracks: dict, stops: dict, net: dict) -> tup
         name, ends = line_names(best, stops)
         place = re.sub(r"^.*Linha (d[aeo]s? )?", "", best["master_name"])
         lines.append({"ref": line, "label": line if net["badge"] == "ref" else place, "name": name,
-                      "ends": ends, "colour": best["colour"], "net": net["key"]})
+                      "ends": ends, "colour": best["colour"], "net": net["key"],
+                      **({"network": best["network"]} if best["network"] != net["network"] else {})})
     return lines, on_way, orientation
 
 

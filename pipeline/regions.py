@@ -13,6 +13,8 @@ OSM by its route relations' `network` tag:
   style    "rail" draws every line of the network in one railway style (parallel tracks
            of different lines then read as one corridor); otherwise lines take their colours
   gtfs     optional timetable in data/raw/gtfs/, for frequencies
+  include  lines of other OSM networks drawn as part of this one: their route master's
+           network and name, and the line's name for the map
   planned  lines under construction: OSM has their track (railway=construction, tagged
            with the line's `name` and the network as `operator`) but no routes yet
 `interchanges` names connected stations whose names differ: {shown name: [station names]}.
@@ -54,6 +56,11 @@ REGIONS = {
                 "routes": ["train"],
                 "badge": "name",
                 "style": "rail",
+                # The narrow-gauge Vouga line is mapped as a CP Regional service.
+                "include": [
+                    {"network": "CP Regional", "master": "CP Regional: Espinho - Vouga ⇆ Oliveira de Azeméis",
+                     "name": "Linha do Vouga"},
+                ],
             },
         ],
         "interchanges": {
