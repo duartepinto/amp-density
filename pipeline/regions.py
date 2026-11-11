@@ -16,9 +16,12 @@ OSM by its route relations' `network` tag:
   include  lines of other OSM networks drawn as part of this one: their route master's
            network and name, and the line's name for the map
   drive_minutes  optional: each open station also gets the area within this drive of it
+  line_stats  figures per line in the Lines view (build_lines.py)
   planned  lines under construction: OSM has their track (railway=construction, tagged
            with the line's `name` and the network as `operator`) but no routes yet
 `interchanges` names connected stations whose names differ: {shown name: [station names]}.
+`core` is the central municipality (its name and census DTMN21 code): the Lines view splits
+residents inside and outside it.
 """
 
 REGIONS = {
@@ -34,6 +37,7 @@ REGIONS = {
                 "routes": ["light_rail", "subway"],
                 "badge": "ref",
                 "gtfs": "amp_metro.zip",
+                "line_stats": True,
                 "planned": {
                     # Track name in OSM -> line. The colours are ours (not yet official), chosen
                     # to stay distinct from lines A-F, also for colour-blind readers.
@@ -65,6 +69,7 @@ REGIONS = {
                 ],
             },
         ],
+        "core": {"name": "Porto", "code": "1312"},
         "interchanges": {
             "Gaia - Devesas": ["Gaia", "Devesas"],  # CP Gaia station is Devesas; Rubi's stop connects
         },

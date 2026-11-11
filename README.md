@@ -15,10 +15,15 @@ station serves.
 - **Click a station** to fade everything outside the area within a 10-minute walk of it, and see
   the residents in that area, its lines and, for the metro, how often trains call. A train
   station also shows the area within a 10-minute drive of it (dashed), and the residents there.
+- **Metro lines** (the Map | Metro lines switch in the title card) compares the metro lines: the
+  residents within a 10-minute walk of each line's stations, per km and per station, inside and
+  outside the municipality of Porto, and the points of interest near them, ranked high, medium or
+  low; with the whole network as a total row. Choose a line for its details and to see it on the
+  map with its walking area.
 
 **Open `index.html`.** It is a static page that works straight from disk or any static host. It loads
 the grid from `data/amp.js` and the rail layer from `data/amp_transit.js`, then the train stations'
-driving areas from `data/amp_drive.js` (scripts, not fetched JSON, so no server is needed). Map tiles (CARTO), MapLibre GL and proj4 come from CDNs. To publish,
+driving areas from `data/amp_drive.js` and the lines' figures from `data/amp_lines.js` (scripts, not fetched JSON, so no server is needed). Map tiles (CARTO), MapLibre GL and proj4 come from CDNs. To publish,
 upload `index.html` and `data/*.js`, not `data/raw/`.
 
 ## Data sources
@@ -254,6 +259,40 @@ departing are counted per line and direction:
 - The panel shows the feed's validity dates. The current feed covers 7 Sep – 25 Oct 2026; refresh it
   when Metro do Porto publishes a new one.
 
+## How the line figures are made
+
+`pipeline/build_lines.py`, for the networks with `line_stats` in `regions.py` (the metro), from the
+stations and walking areas in `data/amp_transit.js`:
+
+- **A line's stations** are those it serves; for Rosa and Rubi, those they will serve (including
+  the open stations they join, such as São Bento).
+- **Residents served:** within a 10-minute walk of any of the line's stations (the union of their
+  walking areas, so nobody counts twice), from the grid as for stations. Lines that share track
+  (A, B, C, E and F between Senhora da Hora and Trindade) share the residents along it. The
+  **Network** row is all open lines together: 286,860 residents.
+- **Per km:** residents served ÷ the line's length, along the one direction of travel the map
+  draws (A 15.7 km, B 33.6 km; network 70.2 km). OSM maps Rosa's and Rubi's construction track
+  for both directions, so track within 15 m of a longer piece is dropped (3.0 and 6.5 km).
+- **Per station:** the mean of each station's own walking-area residents. Areas overlap, so these
+  add up to more than the line's total.
+- **Inside/outside Porto:** residents in the part of the walking areas inside the municipality of
+  Porto (`core` in `regions.py`, the census subsections with `DTMN21` 1312), counting the share of
+  each cell inside; the per-station averages split stations by where they stand.
+- **Points of interest** from OpenStreetMap, ranked by the trips they draw. A place counts for a
+  line when its outline reaches into one of its stations' walking areas, and is listed under the
+  station nearest its centre.
+
+| Rank | What |
+|---|---|
+| High | hospitals of 3 ha or more (São João, Santo António, IPO, Gaia…), the airport (`aeroway=aerodrome` with an IATA code), stations where long-distance trains stop (stops of OSM's `CP Longo Curso` routes: Campanhã, Gaia, Espinho, Trofa, Santo Tirso) |
+| Medium | higher education (`amenity=university`: each faculty), other hospitals (outlines of 0.1 ha or more), shopping centres of 1 ha or more, stadiums, exhibition, conference and concert venues with a Wikidata entry |
+| Low | museums, galleries, theatres, arts centres, zoos, theme parks and markets with a Wikidata entry; sights (`tourism=attraction`) with a Wikipedia article, which leaves out the many listed fountains, trees and pillories; parks of 5 ha or more |
+
+  Each place counts once: a university outline that holds several faculties is dropped (the
+  faculties count); a place sharing its name with one within 500 m, or standing inside another of
+  the same kind, is the same place; a low-ranked one inside any other's outline joins it (the
+  Serralves museum, in its park). The rules and thresholds are at the top of `build_lines.py`.
+
 ## Display rules on the page
 
 - **Density classes** (residents/km²): 0–100, 100–500, 500–1k, 1k–2.5k, 2.5k–5k, 5k–10k, 10k–15k,
@@ -290,9 +329,10 @@ uv run python pipeline/extract_osm.py amp       # OSM buildings, areas -> data/r
 uv run python pipeline/fetch_overture.py amp    # ML footprints        -> data/raw/amp/overture_buildings.gpkg
 uv run python pipeline/build_grid.py amp        # population grid      -> data/amp.js
 uv run python pipeline/build_transit.py amp     # rail layer           -> data/amp_transit.js, amp_drive.js (needs data/amp.js)
+uv run python pipeline/build_lines.py amp       # line figures         -> data/amp_lines.js (needs data/amp_transit.js)
 ```
 
-`build_grid.py` takes about half a minute and `build_transit.py` about five minutes (mostly the driving areas); each prints the
+`build_grid.py` takes about half a minute and `build_transit.py` about five minutes (mostly the driving areas), `build_lines.py` about half a minute; each prints the
 census totals or coverage it produced, to check against.
 
 Not used yet: `pipeline/fetch_lidar.py` downloads DGT LiDAR surface and terrain models (2 m) for
@@ -304,10 +344,11 @@ about 4.4 GB for the AMP (`--dry-run` lists the tiles without downloading).
 
 | Where | What |
 |---|---|
-| `pipeline/regions.py` | regions: name, census `where` clause, bounding box, rail networks (`transit`), linked stations (`interchanges`), lines under construction (`planned`). An `aml` entry for Lisbon is defined but not yet built. |
+| `pipeline/regions.py` | regions: name, census `where` clause, bounding box, rail networks (`transit`), linked stations (`interchanges`), lines under construction (`planned`), figures per line (`line_stats`), the central municipality (`core`). An `aml` entry for Lisbon is defined but not yet built. |
 | `pipeline/build_grid.py` | `CELL` (cell size), `ERRORS`, `FLOOR_HEIGHT_M`, the building rules (`NOT_A_DWELLING`, `COMMERCIAL`, `INDUSTRIAL`, `PUBLIC`, `NOT_A_HOME_NAME`, `NOT_A_HOME_TAGS`…) |
 | `pipeline/extract_osm.py` | `NONRES_AREAS`, the non-residential areas |
 | `pipeline/build_transit.py` | `WALK_MINUTES`, `WALK_KMH`, `REACH_M`, `SNAP_M`, `INTERCHANGE_M`, `PERIODS`, `DRIVE_KMH`, `MAXSPEED_SHARE`, `SIGNAL_S`, `JUNCTION_S`, `DRIVE_REACH_M`… |
+| `pipeline/build_lines.py` | the points-of-interest rules (`classify`, `LARGE_HOSPITAL_HA`, `MALL_HA`, `PARK_HA`, `LONG_DISTANCE`), `PARALLEL_M` |
 | `index.html` | density classes (`BREAKS`, `RAMP`), line widths, basemaps; the Google Tag Manager container (`GTM-MW8LDDHQ`) |
 
 ## Files
@@ -317,6 +358,7 @@ index.html                  the map page (HTML, CSS and JS in one file)
 data/amp.js                 the grid: cell columns (window.GRID_DATA)
 data/amp_transit.js         lines, stations, walking areas, frequencies (window.TRANSIT_DATA)
 data/amp_drive.js           train stations' driving areas, loaded after the map (window.DRIVE_DATA)
+data/amp_lines.js           figures per metro line and their walking areas (window.LINES_DATA)
 data/raw/                   downloads and intermediate files (not published, not in git)
 pipeline/regions.py         region and network configuration
 pipeline/fetch_census.py    INE BGRI 2021 subsections
@@ -324,6 +366,7 @@ pipeline/extract_osm.py     OSM buildings and non-residential areas from the Geo
 pipeline/fetch_overture.py  Overture ML building footprints
 pipeline/build_grid.py      the population grid
 pipeline/build_transit.py   the rail layer
+pipeline/build_lines.py     figures per metro line, points of interest
 pipeline/fetch_lidar.py     DGT LiDAR tiles (not used yet)
 ```
 

@@ -97,7 +97,7 @@
     #legend .sw:first-child span { transform: none; left: 0; }
 
     /* The panel body scrolls, so the close button (and on phones the grip) stay put. */
-    #panel { top: 12px; right: 12px; width: 340px; max-height: calc(100% - 24px); display: flex; flex-direction: column; }
+    #panel { top: 12px; right: 12px; width: 340px; max-height: calc(100% - 24px); display: flex; flex-direction: column; z-index: 3; }
     #panel[hidden] { display: none; }
     #panel-body { overflow-y: auto; min-height: 0; overscroll-behavior: contain; }
     #grip { display: none; }
@@ -164,6 +164,54 @@
     .trains-total b { font-size: 18px; color: var(--ink); font-variant-numeric: tabular-nums; }
     .line-list { list-style: none; padding: 0; margin: 10px 0 0; display: grid; gap: 4px; font-size: 12px; color: var(--ink-2); }
     .line-list li { display: flex; gap: 8px; align-items: center; }
+    /* View switch in the title card: the map, or the metro lines' figures */
+    #views { display: flex; margin-top: 10px; }
+    #views[hidden] { display: none; }
+    #views button {
+      flex: 1; border: 1px solid var(--line); background: none; color: var(--ink-2); padding: 5px 8px;
+      font: inherit; font-size: 12px; font-weight: 600; cursor: pointer;
+    }
+    #views button:first-child { border-radius: 6px 0 0 6px; border-right: 0; }
+    #views button:last-child { border-radius: 0 6px 6px 0; }
+    #views button[aria-pressed="true"] { background: var(--ink); border-color: var(--ink); color: var(--surface); }
+    /* Lines view: comparison tables (rows open a line), a line's details */
+    #panel.lines { width: 480px; }
+    .lines-title { font-size: 20px; font-weight: 650; margin: 0 24px 4px 0; }
+    .lt { width: 100%; border-collapse: collapse; margin-top: 8px; font-size: 12px; font-variant-numeric: tabular-nums; }
+    .lt th, .lt td { padding: 4px 0 4px 8px; text-align: right; font-weight: 400; }
+    .lt thead th { color: var(--muted); font-weight: 500; vertical-align: bottom; line-height: 1.2; }
+    .lt tbody th { text-align: left; padding-left: 0; white-space: nowrap; }
+    .lt tbody tr[data-line] { cursor: pointer; }
+    .lt tbody tr[data-line]:hover > *, .lt tbody tr[data-line]:focus-visible > * { background: var(--track); }
+    .lt tbody tr[data-line]:focus-visible { outline: none; }
+    .lt tr.total > * { border-top: 1px solid var(--line); padding-top: 6px; font-weight: 600; }
+    .lt tr.sep th { color: var(--muted); font-size: 11px; font-weight: 500; padding-top: 12px; }
+    .lt thead button {
+      border: 0; background: none; padding: 0; font: inherit; color: inherit; text-align: inherit; cursor: pointer;
+    }
+    .lt thead button:hover, .lt thead button.on { color: var(--ink); }
+    /* Sort arrow: always laid out (so headers don't shift), faint on hover, solid on the sorted column */
+    .lt thead .arrow { margin-left: 2px; opacity: 0; transition: opacity 0.15s; }
+    .lt thead button:hover .arrow, .lt thead button:focus-visible .arrow { opacity: 0.35; }
+    .lt thead button.on .arrow { opacity: 1; }
+    .poi-sort { display: flex; flex-wrap: wrap; align-items: center; gap: 4px; margin-top: 6px; font-size: 12px; color: var(--muted); }
+    .poi-sort button {
+      border: 1px solid var(--line); background: none; color: var(--ink-2); border-radius: 999px; padding: 1px 8px;
+      font: inherit; cursor: pointer;
+    }
+    .poi-sort button[aria-pressed="true"] { background: var(--ink); border-color: var(--ink); color: var(--surface); }
+    .dbar { height: 4px; margin-top: 3px; border-radius: 2px; background: var(--track); }
+    .dbar i { display: block; height: 100%; border-radius: 2px; }
+    .back {
+      border: 0; background: none; padding: 0; margin: 0 0 10px; font: inherit; font-size: 12px;
+      font-weight: 600; color: var(--ink-2); cursor: pointer;
+    }
+    .line-title { display: flex; align-items: center; gap: 8px; }
+    #panel details { margin-top: 8px; font-size: 12px; }
+    #panel summary { cursor: pointer; font-weight: 600; color: var(--ink-2); }
+    .poi-list { list-style: none; padding: 0; margin: 4px 0 0; display: grid; gap: 3px; }
+    .poi-list li { display: flex; justify-content: space-between; gap: 12px; }
+    .poi-list li span { color: var(--muted); text-align: right; flex: none; max-width: 50%; }
     .tip .maplibregl-popup-content {
       background: var(--surface); color: var(--ink); padding: 4px 8px; border-radius: 6px;
       font: 12px/1.3 system-ui, -apple-system, "Segoe UI", sans-serif; box-shadow: 0 1px 6px rgb(0 0 0 / 0.2);
@@ -185,11 +233,11 @@
       #title.folded #fold::before { transform: translateY(-4px) rotate(45deg); }
       #title.folded #subtitle, #title.folded #status, #title.folded #transit-toggles, #title.folded .card-foot { display: none; }
       #title.folded #legend { margin-bottom: 14px; }
+      #title.folded #views { margin-top: 0; }
       /* Bottom sheet: a short peek at the top of the details, tap or swipe up for the rest. */
       #panel {
-        top: auto; bottom: 0; right: 0; left: 0; width: auto; max-height: 80%;
+        top: auto; bottom: 0; right: 0; left: 0; width: auto !important; max-height: 80%;
         border-radius: 12px 12px 0 0; padding-top: 20px;
-        z-index: 3; /* over the map's attribution */
       }
       #panel:not(.expanded) { max-height: 160px; cursor: pointer; }
       #panel:not(.expanded) #panel-body { overflow: hidden; }
@@ -217,6 +265,10 @@
     <div id="legend"></div>
     <p class="muted small" id="status">Loading grid…</p>
     <div id="transit-toggles"></div>
+    <div id="views" role="group" aria-label="View" hidden>
+      <button type="button" data-view="map" aria-pressed="true">Map</button>
+      <button type="button" data-view="lines" aria-pressed="false">Metro lines</button>
+    </div>
     <div class="card-foot">
       <a href="https://coff.ee/duartepinto" target="_blank" rel="noopener" class="coffee-button"><span aria-hidden="true">☕</span> <span id="coffee-text">Buy me a coffee</span></a>
       <div id="lang" role="group" aria-label="Language">
@@ -277,6 +329,11 @@
     let drives = null; // data/<region>_drive.js: {station name: driving area}, loaded after the rest
     let selected = null;
     let station = null; // index into transit.stations
+    let lines = null; // data/<region>_lines.js (pipeline/build_lines.py): figures per metro line, when built
+    let view = "map"; // "map", or "lines": the metro lines' figures in the panel
+    let lineSel = null; // in the lines view, the ref of the line shown
+    const lineSorts = {}; // lines view, per table: {col, dir} (dir -1: largest first); none: in line order
+    let poiSort = "name"; // a line's points of interest: by "name", "kind" or "station"
     // isStyleLoaded() is false while tiles load, so track "style.load" ourselves.
     let styleReady = false;
     const startedWithView = Boolean(location.hash); // MapLibre writes the hash on load
@@ -383,6 +440,60 @@
         toggleDrive: (p, m) => `; ${p}% within a ${m}-min drive`,
         anyStation: (p, m) => `${p}% live within a ${m}-min walk of any station.`,
         plannedName: (line) => line.name.match(/^Linha (\S+)$/)?.[1] ?? line.label,
+        // Lines view
+        views: "View",
+        viewMap: "Map",
+        viewLines: "Metro lines",
+        linesTitle: "Metro lines",
+        linesIntro: (m) => `Residents within a ${m}-minute walk of each line's stations. Choose a line to see it on the map.`,
+        servedHeading: "Residents served",
+        colStations: "Stations",
+        colKm: "km",
+        colResidents: "Residents",
+        colPerKm: "Per km",
+        colPerStation: "Per station",
+        coreHeading: (c) => `Inside and outside ${c}`,
+        colStationsIn: (c) => `Stations in ${c}`,
+        colResidentsIn: (c) => `Residents in ${c}`,
+        colResidentsOut: "Residents outside",
+        colAvgIn: (c) => `Per station in ${c}`,
+        colAvgOut: "Per station outside",
+        poiHeading: "Points of interest",
+        tiers: ["High", "Medium", "Low"],
+        network: "Network",
+        underConstructionCap: "Under construction",
+        linesTableNote: (c) => `Per station: the average of each station's own walking area. Neighbouring areas overlap,
+          so stations close together share residents. Inside ${c}: the municipality (concelho) of ${c}; stations are counted
+          by where they stand. Network: all open lines together, each resident and place counted once.`,
+        backToLines: "← All lines",
+        sortHint: "Sort",
+        sortBy: "Sort by",
+        sortPoi: { name: "Name", kind: "Type", station: "Station" },
+        lineHero: (m) => `residents within a ${m}-min walk of its stations`,
+        stationsWord: "Stations",
+        length: "Length",
+        perKm: "Residents per km",
+        perStation: "Average per station",
+        inCore: (c) => `In ${c}`,
+        outsideCore: "Outside",
+        stationsIn: (c) => `Stations in ${c}`,
+        ofTotal: (a, b) => `${a} of ${b}`,
+        perStationIn: (c) => `Average per station in ${c}`,
+        perStationOut: "Average per station outside",
+        poiKinds: {
+          hospital: "Hospital", airport: "Airport", rail: "Long-distance trains", education: "Higher education",
+          mall: "Shopping centre", stadium: "Stadium", venue: "Venue", museum: "Museum", theatre: "Theatre",
+          park: "Park", market: "Market", sight: "Sight",
+        },
+        poiNote: (big, mall, park) => `From OpenStreetMap, ranked by the trips they draw. High: hospitals of ${big} ha
+          or more, the airport and stations with long-distance trains. Medium: higher education, other hospitals,
+          shopping centres of ${mall} ha or more, major stadiums and venues. Low: museums, theatres, sights with a
+          Wikipedia article, parks of ${park} ha or more and zoos. A place counts when it reaches into a station's
+          walking area, and is listed under the station nearest its centre.`,
+        lineNote: (m, c) => `Residents within a ${m}-minute walk of any of the line's stations, each counted once; per km,
+          over the line's length along one direction of travel. Per station: the average of each station's own walking
+          area. Lines that share track share the residents along it. ${c}: the part of the walking areas inside the
+          municipality, from the census grid; stations by where they stand.`,
       },
       pt: {
         locale: "pt-PT",
@@ -468,6 +579,59 @@
         toggleDrive: (p, m) => `; ${p}% a ${m} min de carro`,
         anyStation: (p, m) => `${p}% vivem a ${m} min a pé de pelo menos uma estação.`,
         plannedName: (line) => line.name.match(/^Linha (\S+)$/)?.[1] ?? line.label,
+        views: "Vista",
+        viewMap: "Mapa",
+        viewLines: "Linhas de metro",
+        linesTitle: "Linhas de metro",
+        linesIntro: (m) => `Residentes a ${m} minutos a pé das estações de cada linha. Escolha uma linha para a ver no mapa.`,
+        servedHeading: "Residentes servidos",
+        colStations: "Estações",
+        colKm: "km",
+        colResidents: "Residentes",
+        colPerKm: "Por km",
+        colPerStation: "Por estação",
+        coreHeading: (c) => `Dentro e fora do ${c}`,
+        colStationsIn: (c) => `Estações no ${c}`,
+        colResidentsIn: (c) => `Residentes no ${c}`,
+        colResidentsOut: "Residentes fora",
+        colAvgIn: (c) => `Por estação no ${c}`,
+        colAvgOut: "Por estação fora",
+        poiHeading: "Pontos de interesse",
+        tiers: ["Alta", "Média", "Baixa"],
+        network: "Rede",
+        underConstructionCap: "Em construção",
+        linesTableNote: (c) => `Por estação: média da área a pé de cada estação. As áreas de estações vizinhas sobrepõem-se,
+          por isso estações próximas partilham residentes. No ${c}: dentro do concelho do ${c}; as estações contam pelo
+          sítio onde ficam. Rede: todas as linhas abertas em conjunto, cada residente e cada local contados uma só vez.`,
+        backToLines: "← Todas as linhas",
+        sortHint: "Ordenar",
+        sortBy: "Ordenar por",
+        sortPoi: { name: "Nome", kind: "Tipo", station: "Estação" },
+        lineHero: (m) => `residentes a ${m} min a pé das suas estações`,
+        stationsWord: "Estações",
+        length: "Extensão",
+        perKm: "Residentes por km",
+        perStation: "Média por estação",
+        inCore: (c) => `No ${c}`,
+        outsideCore: "Fora",
+        stationsIn: (c) => `Estações no ${c}`,
+        ofTotal: (a, b) => `${a} de ${b}`,
+        perStationIn: (c) => `Média por estação no ${c}`,
+        perStationOut: "Média por estação fora",
+        poiKinds: {
+          hospital: "Hospital", airport: "Aeroporto", rail: "Comboios de longo curso", education: "Ensino superior",
+          mall: "Centro comercial", stadium: "Estádio", venue: "Espaço de eventos", museum: "Museu", theatre: "Teatro",
+          park: "Parque", market: "Mercado", sight: "Monumento",
+        },
+        poiNote: (big, mall, park) => `Do OpenStreetMap, ordenados pelas deslocações que atraem. Alta: hospitais com
+          ${big} ha ou mais, o aeroporto e as estações com comboios de longo curso. Média: ensino superior, outros
+          hospitais, centros comerciais com ${mall} ha ou mais, grandes estádios e espaços de eventos. Baixa: museus,
+          teatros, monumentos com artigo na Wikipédia, parques com ${park} ha ou mais e jardins zoológicos. Um local conta
+          quando entra na área a pé de uma estação, e aparece junto da estação mais próxima do seu centro.`,
+        lineNote: (m, c) => `Residentes a ${m} minutos a pé de qualquer estação da linha, cada um contado uma só vez; por km,
+          sobre a extensão da linha num sentido. Por estação: média da área a pé de cada estação. Linhas que partilham
+          troços partilham os residentes ao longo deles. ${c}: a parte das áreas a pé dentro do concelho, a partir da
+          grelha dos censos; as estações contam pelo sítio onde ficam.`,
       },
     };
     const LANGS = Object.keys(I18N);
@@ -709,6 +873,7 @@
       // line's station) gets a marker at each, joined by a capsule-shaped connector, the
       // usual transit-map sign that they are one station. All its pieces share its id.
       const nets = (s) => Object.fromEntries(s.nets.map((k) => [`on_${k}`, true]));
+      const refsOf = (s) => ` ${[...s.lines, ...s.planned].join(" ")} `; // " A B " for a substring test
       map.addSource("stations", {
         type: "geojson",
         data: {
@@ -716,7 +881,8 @@
           features: transit.stations.flatMap((s, i) =>
             (s.parts ?? [[s.lon, s.lat, s.lines.length ? 0 : 1]]).map(([lon, lat, future], j) => ({
               type: "Feature", id: i,
-              properties: { name: s.name, hub: s.lines.length + s.planned.length > 1, future: Boolean(future), label: j === 0, ...nets(s) },
+              properties: { name: s.name, hub: s.lines.length + s.planned.length > 1, future: Boolean(future), label: j === 0,
+                refs: refsOf(s), ...nets(s) },
               geometry: { type: "Point", coordinates: [lon, lat] },
             }))),
         },
@@ -726,7 +892,7 @@
         data: {
           type: "FeatureCollection",
           features: transit.stations.flatMap((s, i) => s.parts ? [{
-            type: "Feature", id: i, properties: nets(s),
+            type: "Feature", id: i, properties: { refs: refsOf(s), ...nets(s) },
             geometry: { type: "MultiLineString", coordinates: s.parts.slice(1).map((p) => [s.parts[0].slice(0, 2), p.slice(0, 2)]) },
           }] : []),
         },
@@ -757,6 +923,7 @@
         paint: { "text-color": ["case", ["get", "future"], muted, ink], "text-halo-color": surface, "text-halo-width": 1.5 } });
       applyNetworkFilters();
       if (station !== null) showWalk(station);
+      if (lineSel !== null) highlightLine(lineSel);
     }
 
     function markStation(i, selected) {
@@ -894,16 +1061,176 @@
       select(null);
       showWalk(i);
       showStation(i);
-      const [w, s, e, n] = (driveOf(i) ?? transit.stations[i].walk).flat(2).reduce(
+      fitArea(driveOf(i) ?? transit.stations[i].walk);
+    }
+
+    // Fit the map to an area (GeoJSON MultiPolygon coordinates) in the part the cards leave clear.
+    function fitArea(area) {
+      const [w, s, e, n] = area.flat(2).reduce(
         ([w, s, e, n], [x, y]) => [Math.min(w, x), Math.min(s, y), Math.max(e, x), Math.max(n, y)],
         [Infinity, Infinity, -Infinity, -Infinity]);
       const free = clearArea();
       map.fitBounds([[w, s], [e, n]], {
         padding: narrowQuery.matches
           ? { top: free.top + 10, bottom: innerHeight - free.bottom + 10, left: 20, right: 20 }
-          : { top: 40, bottom: 40, left: 340, right: 380 },
+          : { top: 40, bottom: 40, left: 340, right: panel.offsetWidth + 40 },
         maxZoom: 15,
       });
+    }
+
+    // Lines view: the metro lines compared in the panel. A chosen line is highlighted on the
+    // map, the others faded, and outside its stations' walking area faded too.
+    const LINE_DIM = 0.15;
+    const esc = (v) => String(v).replace(/[&<>"]/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" })[c]);
+    function highlightLine(ref) {
+      if (!map.getSource("transit")) return;
+      const mine = ref && ["all", ["==", ["get", "net"], lineOf(ref).net], ["==", ["get", "ref"], ref]];
+      const track = ref ? ["case", mine, 1, LINE_DIM] : 1;
+      for (const id of TRACK_LAYERS) map.setPaintProperty(id, "line-opacity", track);
+      const stop = ref ? ["case", ["in", ` ${ref} `, ["get", "refs"]], 1, LINE_DIM] : 1;
+      map.setPaintProperty("stations", "circle-opacity", stop);
+      map.setPaintProperty("stations", "circle-stroke-opacity", stop);
+      map.setPaintProperty("station-labels", "text-opacity", stop);
+      for (const id of ["station-links-casing", "station-links"]) map.setPaintProperty(id, "line-opacity", stop);
+      map.getSource("walk").setData(ref ? masked(lines.lines[ref].area) : EMPTY);
+      map.getSource("drive").setData(EMPTY);
+      map.setPaintProperty("walk-mask", "fill-opacity", WALK_FADE);
+    }
+
+    function setView(next) {
+      if (next === view) return;
+      if (next === "lines") {
+        select(null);
+        selectStation(null);
+      }
+      view = next;
+      lineSel = null;
+      for (const b of document.querySelectorAll("#views button")) b.setAttribute("aria-pressed", b.dataset.view === view);
+      try {
+        const url = new URL(location.href);
+        if (view === "lines") url.searchParams.set("view", "lines");
+        else url.searchParams.delete("view");
+        history.replaceState(history.state, "", url);
+      } catch {}
+      highlightLine(null);
+      panel.classList.toggle("lines", view === "lines");
+      if (view === "map") return closePanel();
+      renderLines();
+      panel.hidden = false;
+      expandPanel(true);
+      foldTitle(true);
+    }
+
+    function selectLine(ref) {
+      lineSel = ref;
+      highlightLine(ref);
+      renderLines();
+      expandPanel(ref === null); // phones: the overview fills the sheet; a line peeks, so the map shows
+      document.getElementById("panel-body").scrollTop = 0;
+      if (ref !== null) fitArea(lines.lines[ref].area);
+    }
+
+    function renderLines() {
+      document.getElementById("panel-body").innerHTML = lineSel === null ? linesOverview() : lineDetail(lineSel);
+    }
+
+    const num = (v) => (v == null || !isFinite(v) ? "–" : fmtInt.format(v));
+    const tierCounts = (f) => [0, 1, 2].map((k) => f.pois.filter((p) => p[1] === k).length);
+
+    // Three tables, one row per line: open lines, the whole network, then lines under construction.
+    function linesOverview() {
+      const refs = Object.keys(lines.lines);
+      const open = refs.filter((r) => !lineOf(r).planned), soon = refs.filter((r) => lineOf(r).planned);
+      const total = lines.networks[lineOf(refs[0]).net];
+      const core = lines.core;
+      const max = Math.max(...refs.map((r) => lines.lines[r].pop));
+      const bar = (v, r) => `<div class="dbar"><i style="width:${(100 * v) / max}%;background:${lineOf(r).colour}"></i></div>`;
+      // cols: [heading, shown(figures, ref), value(figures) to sort by]. Rows sort within open
+      // lines and within lines under construction; the network row stays between them.
+      const table = (id, cols) => {
+        const sort = lineSorts[id];
+        const td = (v) => `<td>${v}</td>`;
+        const row = (r) => `<tr data-line="${r}" tabindex="0"><th>${badge(r)}</th>${cols.map((c) => td(c[1](lines.lines[r], r))).join("")}</tr>`;
+        const order = (rs) => !sort ? rs : [...rs].sort((a, b) => {
+          const [va, vb] = [a, b].map((r) => cols[sort.col][2](lines.lines[r]));
+          if (va == null || vb == null) return (va == null) - (vb == null) || a.localeCompare(b); // no value: last
+          return sort.dir * (va - vb) || a.localeCompare(b);
+        });
+        const head = cols.map(([h], k) => {
+          const on = sort?.col === k;
+          return `<th scope="col" aria-sort="${on ? (sort.dir < 0 ? "descending" : "ascending") : "none"}">
+            <button type="button" class="${on ? "on" : ""}" data-sort="${id}" data-col="${k}" title="${t("sortHint")}">${h}<span
+              class="arrow" aria-hidden="true">${on && sort.dir > 0 ? "↑" : "↓"}</span></button></th>`;
+        }).join("");
+        return `<table class="lt">
+          <thead><tr><th></th>${head}</tr></thead>
+          <tbody>
+            ${order(open).map(row).join("")}
+            <tr class="total"><th>${t("network")}</th>${cols.map((c) => td(c[1](total, null))).join("")}</tr>
+            ${soon.length ? `<tr class="sep"><th colspan="${cols.length + 1}">${t("underConstructionCap")}</th></tr>${order(soon).map(row).join("")}` : ""}
+          </tbody>
+        </table>`;
+      };
+      const perKm = (f) => f.pop / f.km;
+      return `
+        <div class="lines-title">${t("linesTitle")}</div>
+        <p class="note" style="margin-top:0">${t("linesIntro", lines.walk_minutes)}</p>
+        <h2>${t("servedHeading")}</h2>
+        ${table("served", [
+          [t("colStations"), (f) => num(f.stations), (f) => f.stations],
+          [t("colKm"), (f) => fmt1.format(f.km), (f) => f.km],
+          [t("colResidents"), (f, r) => num(f.pop) + (r ? bar(f.pop, r) : ""), (f) => f.pop],
+          [t("colPerKm"), (f) => num(perKm(f)), perKm],
+          [t("colPerStation"), (f) => num(f.avg), (f) => f.avg],
+        ])}
+        <h2>${t("coreHeading", core)}</h2>
+        ${table("core", [
+          [t("colStationsIn", core), (f) => t("ofTotal", f.stations_core, f.stations), (f) => f.stations_core],
+          [t("colResidentsIn", core), (f) => num(f.pop_core), (f) => f.pop_core],
+          [t("colResidentsOut"), (f) => num(f.pop - f.pop_core), (f) => f.pop - f.pop_core],
+          [t("colAvgIn", core), (f) => num(f.avg_core), (f) => f.avg_core],
+          [t("colAvgOut"), (f) => num(f.avg_out), (f) => f.avg_out],
+        ])}
+        <h2>${t("poiHeading")}</h2>
+        ${table("poi", t("tiers").map((label, k) => [label, (f) => num(tierCounts(f)[k]), (f) => tierCounts(f)[k]]))}
+        <p class="note">${t("linesTableNote", core)}</p>
+        <p class="note">${t("poiNote", lines.rules.large_hospital_ha, lines.rules.mall_ha, lines.rules.park_ha)}</p>`;
+    }
+
+    function lineDetail(ref) {
+      const f = lines.lines[ref], line = lineOf(ref), core = lines.core;
+      const kinds = t("poiKinds");
+      const counts = tierCounts(f);
+      const key = { name: (p) => p[0], kind: (p) => kinds[p[2]] ?? p[2], station: (p) => p[3] }[poiSort];
+      const cmp = (a, b) => key(a).localeCompare(key(b), t("locale")) || a[0].localeCompare(b[0], t("locale"));
+      const group = (k) => `<details ${k < 2 ? "open" : ""}><summary>${t("tiers")[k]} · ${counts[k]}</summary>
+        <ul class="poi-list">${f.pois.filter((p) => p[1] === k).sort(cmp).map(([name, , kind, st]) =>
+          `<li>${esc(name)}<span>${kinds[kind] ?? kind} · ${esc(st)}</span></li>`).join("")}</ul></details>`;
+      const sorter = `<div class="poi-sort" role="group" aria-label="${t("sortBy")}">${t("sortBy")}
+        ${["name", "kind", "station"].map((by) => `<button type="button" data-poisort="${by}" aria-pressed="${poiSort === by}">${t("sortPoi")[by]}</button>`).join("")}</div>`;
+      return `
+        <button type="button" class="back" data-back>${t("backToLines")}</button>
+        <div class="station-name line-title">${badge(ref)} <span>${line.name}</span></div>
+        <p class="note" style="margin:-4px 0 8px">${line.planned ? t("planned", line, line.opening) : line.ends}</p>
+        <div class="hero">${num(f.pop)} <small>${t("lineHero", lines.walk_minutes)}</small></div>
+        <dl class="rows">
+          <dt>${t("stationsWord")}</dt><dd>${f.stations}</dd>
+          <dt>${t("length")}</dt><dd>${fmt1.format(f.km)} km</dd>
+          <dt>${t("perKm")}</dt><dd>${num(f.pop / f.km)}</dd>
+          <dt>${t("perStation")}</dt><dd>${num(f.avg)}</dd>
+        </dl>
+        <h2>${t("coreHeading", core)}</h2>
+        ${splitBar([t("inCore", core), f.pop_core, "--apts"], [t("outsideCore"), f.pop - f.pop_core, "--houses"])}
+        <dl class="rows">
+          <dt>${t("stationsIn", core)}</dt><dd>${t("ofTotal", f.stations_core, f.stations)}</dd>
+          <dt>${t("perStationIn", core)}</dt><dd>${num(f.avg_core)}</dd>
+          <dt>${t("perStationOut")}</dt><dd>${num(f.avg_out)}</dd>
+        </dl>
+        <h2>${t("poiHeading")}</h2>
+        ${sorter}
+        ${[0, 1, 2].map(group).join("")}
+        <p class="note">${t("poiNote", lines.rules.large_hospital_ha, lines.rules.mall_ha, lines.rules.park_ha)}</p>
+        <p class="note">${t("lineNote", lines.walk_minutes, core)}</p>`;
     }
 
     function floorsBlock(c, i) {
@@ -973,6 +1300,7 @@
     }
     function closePanel() {
       panel.hidden = true;
+      panel.classList.remove("lines");
       foldTitle(titleFolded);
     }
     // Phones: the title card folds while something is selected, and otherwise as the
@@ -1030,7 +1358,7 @@
       if (hovered !== null) map.setFeatureState({ source: "cells", id: hovered }, { hover: false });
       hovered = id;
       map.setFeatureState({ source: "cells", id }, { hover: true });
-      map.getCanvas().style.cursor = "pointer";
+      map.getCanvas().style.cursor = view === "lines" ? "" : "pointer";
     });
     map.on("mouseleave", "cells-fill", () => {
       if (hovered !== null) map.setFeatureState({ source: "cells", id: hovered }, { hover: false });
@@ -1047,7 +1375,7 @@
       if (!hit) {
         if (tipFor !== null) {
           tip.remove();
-          map.getCanvas().style.cursor = hovered !== null ? "pointer" : "";
+          map.getCanvas().style.cursor = hovered !== null && view !== "lines" ? "pointer" : "";
         }
         tipFor = null;
         return;
@@ -1062,13 +1390,21 @@
     });
     map.on("click", (ev) => {
       const st = stationAt(ev.point);
-      if (st) return selectStation(st.id);
+      if (st) {
+        setView("map");
+        return selectStation(st.id);
+      }
+      if (view === "lines") return; // cells aren't picked in the lines view
       const hit = map.queryRenderedFeatures(ev.point, { layers: ["cells-fill"] })[0];
       if (hit) return select(hit.id);
       select(null);
       selectStation(null);
     });
-    const clearAll = () => { select(null); selectStation(null); };
+    const clearAll = () => {
+      if (view === "lines") return setView("map");
+      select(null);
+      selectStation(null);
+    };
     document.getElementById("close").addEventListener("click", clearAll);
     // Bottom sheet (phones): the grip toggles it, a tap on the peek expands it, and a swipe
     // up expands it while a swipe down collapses it (once scrolled to the top) or closes it.
@@ -1096,7 +1432,46 @@
       else if (dy > 30 && expanded && atTop) expandPanel(false);
       else if (dy > 30 && !expanded) clearAll();
     });
-    document.addEventListener("keydown", (ev) => ev.key === "Escape" && clearAll());
+    document.addEventListener("keydown", (ev) => {
+      if (ev.key !== "Escape") return;
+      if (view === "lines" && lineSel !== null) selectLine(null);
+      else clearAll();
+    });
+    document.getElementById("views").addEventListener("click", (ev) => {
+      const next = ev.target.closest("button")?.dataset.view;
+      if (next) setView(next);
+    });
+    // Lines view: a table row opens its line, the back button returns to the tables.
+    document.getElementById("panel-body").addEventListener("click", (ev) => {
+      if (view !== "lines") return;
+      const row = ev.target.closest("[data-line]");
+      if (row) {
+        ev.stopPropagation(); // not the sheet's tap-to-expand
+        return selectLine(row.dataset.line);
+      }
+      if (ev.target.closest("[data-back]")) return selectLine(null);
+      // Sorting: a column sorts largest first, then smallest first, then back to line order.
+      const head = ev.target.closest("[data-sort]");
+      const by = ev.target.closest("[data-poisort]")?.dataset.poisort;
+      if (!head && !by) return;
+      ev.stopPropagation();
+      if (head) {
+        const { sort: id } = head.dataset, col = Number(head.dataset.col), now = lineSorts[id];
+        lineSorts[id] = now?.col !== col ? { col, dir: -1 } : now.dir < 0 ? { col, dir: 1 } : undefined;
+      } else {
+        poiSort = by;
+      }
+      const body = document.getElementById("panel-body"), scroll = body.scrollTop;
+      renderLines();
+      body.scrollTop = scroll;
+      document.querySelector(head ? `[data-sort="${head.dataset.sort}"][data-col="${head.dataset.col}"]` : `[data-poisort="${by}"]`)?.focus();
+    });
+    document.getElementById("panel-body").addEventListener("keydown", (ev) => {
+      const row = view === "lines" && (ev.key === "Enter" || ev.key === " ") && ev.target.closest("[data-line]");
+      if (!row) return;
+      ev.preventDefault();
+      selectLine(row.dataset.line);
+    });
     document.getElementById("transit-toggles").addEventListener("change", (ev) => {
       const key = ev.target.dataset.net;
       if (ev.target.checked) shown.add(key);
@@ -1165,6 +1540,12 @@
         for (const n of transit.networks) shown.add(n.key);
         renderToggles();
         addTransitLayers();
+        // Figures per metro line, for the lines view (optional, like the rail layer).
+        loadScript(`data/${REGION}_lines.js`, "LINES_DATA").then((json) => {
+          lines = json;
+          document.getElementById("views").hidden = false;
+          if (new URLSearchParams(location.search).get("view") === "lines") setView("lines");
+        }).catch(() => {});
         // Driving areas are big: load them once the map is up, and show the open station's.
         if (transit.networks.some((n) => n.drive_minutes)) {
           loadScript(`data/${REGION}_drive.js`, "DRIVE_DATA").then((json) => {
@@ -1207,12 +1588,15 @@
       document.getElementById("grip").setAttribute("aria-label", t("showMoreDetails"));
       document.getElementById("close").setAttribute("aria-label", t("close"));
       foldTitle(document.getElementById("title").classList.contains("folded"));
+      document.getElementById("views").setAttribute("aria-label", t("views"));
+      for (const b of document.querySelectorAll("#views button")) b.textContent = t(b.dataset.view === "map" ? "viewMap" : "viewLines");
       renderLegend();
       renderGridText();
       if (transit) renderToggles();
       if (panel.hidden) return;
       const expanded = panel.classList.contains("expanded"), scroll = document.getElementById("panel-body").scrollTop;
-      if (selected !== null) showCell(selected);
+      if (view === "lines") renderLines();
+      else if (selected !== null) showCell(selected);
       else if (station !== null) showStation(station);
       expandPanel(expanded);
       document.getElementById("panel-body").scrollTop = scroll;
