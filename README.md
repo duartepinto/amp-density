@@ -15,6 +15,10 @@ station serves.
 - **Click a station** to fade everything outside the area within a 10-minute walk of it, and see
   the residents in that area, its lines and, for the metro, how often trains call. A train
   station also shows the area within a 10-minute drive of it (dashed), and the residents there.
+- **Planned metro lines**, dotted, each set with its own toggle: **Metro do Porto 3.0** (Gondomar II,
+  ISMAI – Muro towards Trofa, São Mamede and Maia II, as projected by Metro do Porto) and **Porto's
+  PMUS** (the city's 2026 mobility plan: the Campo Alegre line, Rosa and Rubi extensions, and the
+  links it proposes to study). Their stations have walking areas like any other.
 - **Metro lines** (the Map | Metro lines switch in the title card) compares the metro lines: the
   residents within a 10-minute walk of each line's stations, per km and per station, inside and
   outside the municipality of Porto, and the points of interest near them, ranked high, medium or
@@ -210,6 +214,38 @@ official ones exist. The opening year comes from OSM's `opening_date` where tagg
 No time is added for stairs, slopes, crossings or reaching the platform, so in steep parts of Porto
 10 minutes is generous.
 
+### Planned lines (Metro do Porto 3.0, PMUS)
+
+OSM has no routes or stations for lines not yet being built, so they are set by hand in
+`pipeline/projects.py`, with the sources and how each station was placed. A station they join
+(Estádio do Dragão, ISMAI, IPO…) is the existing one; stations a few metres from one (IPO II,
+Senhora da Hora II, Os Verdes II, Parque Maia II, Matosinhos Sul II) are listed with it under
+`interchanges`.
+
+- **Metro do Porto 3.0** ([Metro do Porto, 2023](https://www.metrodoporto.pt/pages/630?news_id=488)).
+  Track: OSM's `railway=proposed` ways of each line (Maia II's way also carries the metroBus spur to
+  the airport, cut off at Os Verdes II: the metro option ends there, 13.0 km as officially).
+  Stations are placed on that track: **Gondomar II** from the Estudo Prévio in public consultation
+  (Aug–Sep 2026), whose report places every station by street (all within 60 m of the track but
+  Parque Oriental, 140 m); **ISMAI – Muro** likewise (EIA consultation Aug–Oct 2026; light rail to
+  Muro, then a metroBus to Trofa, not drawn); **São Mamede** and **Maia II** (preliminary studies;
+  Maia II's metro or metroBus not decided, the metro option is drawn) at their named places where
+  these are precise, the rest spaced between them in the proportions of Metro do Porto's maps.
+- **PMUS** ([Porto, consultation Sep–Nov 2026](https://mobilidade.cm-porto.pt/destaque/pmus-discussao-publica),
+  action TP.08). Its stations are read off the plan's map (Fig. 57, drawn in ETRS89/PT-TM06),
+  georeferenced on the 28 open stations it shows (median error 13 m); track is a smooth curve through
+  them. Campo Alegre (to build within the plan), Rosa Casa da Música – Roberto Frias – Campanhã
+  (designs within the plan), and the links to study: the Rosa ring Campanhã – São Bento, Rubi north
+  to Monte dos Burgos, Campo Alegre east to the Dragão (its two stations, unnamed in the plan, are
+  named after what it says they serve).
+- **Beyond Porto:** the PMUS stops at the city boundary. Campo Alegre continues from Anémona to
+  Matosinhos Sul along Rua de Brito Capelo as in Metro do Porto's 2009 design of the line (EIA,
+  SIAIA AIA2063), the only plan for that side; Matosinhos's own current project there is a metroBus.
+- **Coverage:** with Metro do Porto 3.0, 23.0% of AMP residents would live within a 10-minute walk
+  of the metro (16.5% today, 18.1% with Rosa and Rubi); with the PMUS lines, 22.5%. In the lines
+  view, **New** is the residents a planned line brings within a walk of the metro beyond the open
+  stations (and, for these planned lines, beyond those being built).
+
 ### Driving areas (train stations)
 
 For networks with `drive_minutes` in `regions.py` (the trains: 10), each open station also gets the
@@ -348,6 +384,7 @@ about 4.4 GB for the AMP (`--dry-run` lists the tiles without downloading).
 | `pipeline/build_grid.py` | `CELL` (cell size), `ERRORS`, `FLOOR_HEIGHT_M`, the building rules (`NOT_A_DWELLING`, `COMMERCIAL`, `INDUSTRIAL`, `PUBLIC`, `NOT_A_HOME_NAME`, `NOT_A_HOME_TAGS`…) |
 | `pipeline/extract_osm.py` | `NONRES_AREAS`, the non-residential areas |
 | `pipeline/build_transit.py` | `WALK_MINUTES`, `WALK_KMH`, `REACH_M`, `SNAP_M`, `INTERCHANGE_M`, `PERIODS`, `DRIVE_KMH`, `MAXSPEED_SHARE`, `SIGNAL_S`, `JUNCTION_S`, `DRIVE_REACH_M`… |
+| `pipeline/projects.py` | planned lines (Metro do Porto 3.0, PMUS): stations, colours, official lengths, status, sources |
 | `pipeline/build_lines.py` | the points-of-interest rules (`classify`, `LARGE_HOSPITAL_HA`, `MALL_HA`, `PARK_HA`, `LONG_DISTANCE`), `PARALLEL_M` |
 | `index.html` | density classes (`BREAKS`, `RAMP`), line widths, basemaps; the Google Tag Manager container (`GTM-MW8LDDHQ`) |
 
@@ -366,6 +403,7 @@ pipeline/extract_osm.py     OSM buildings and non-residential areas from the Geo
 pipeline/fetch_overture.py  Overture ML building footprints
 pipeline/build_grid.py      the population grid
 pipeline/build_transit.py   the rail layer
+pipeline/projects.py        planned lines not in OSM (Metro do Porto 3.0, PMUS)
 pipeline/build_lines.py     figures per metro line, points of interest
 pipeline/fetch_lidar.py     DGT LiDAR tiles (not used yet)
 ```
@@ -384,3 +422,5 @@ pipeline/fetch_lidar.py     DGT LiDAR tiles (not used yet)
   one gets at peak times.
 - **Frequencies** are from a timetable, not real running, and only for the metro.
 - **Rosa and Rubi:** colours are provisional and three Rubi stations are placed approximately.
+- **Planned lines** are plans: stations are placed from documents and maps (see above), colours
+  are ours, and PMUS track is drawn through its stations, not along a designed alignment.

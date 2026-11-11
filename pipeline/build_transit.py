@@ -12,7 +12,9 @@ apart (Hospital São João's metro and train stops, 390 m) stay separate. Connec
 with different names are listed under `interchanges` in regions.py.
 
 Lines under construction (`planned`) come from their construction track and station
-sites; stations OSM lacks are placed approximately on the track.
+sites; stations OSM lacks are placed approximately on the track. Projected lines
+(`projects`: projects.py) have their stations placed by hand from the plans, and their
+track from OSM railway=proposed where mapped, else a smooth curve through the stations.
 
 Walking area: everything reachable within WALK_MINUTES at WALK_KMH along OSM streets,
 footpaths and stairs (no motorways), starting from the street points around the
@@ -56,6 +58,7 @@ import shapely
 import shapely.ops
 from pyproj import Transformer
 
+from projects import PROJECTS
 from regions import REGIONS
 
 ROOT = Path(__file__).resolve().parent.parent
@@ -191,16 +194,17 @@ def read_routes(net: dict) -> list[dict]:
     return kept
 
 
-def read_osm(routes: list[dict], bbox, operators: set[str]) -> dict:
+def read_osm(routes: list[dict], bbox, operators: set[str], proposers: set[str] = frozenset()) -> dict:
     """From one pass over the extract:
 
     stops: {node id: (name or None, lon, lat)}, tracks: {way id: [(node, lon, lat)]},
     walk: [nodes], drive: [(nodes, km/h, oneway, parking allowed, service road)], signals: {node ids}, and construction sites of the given operators: building:
-    [(way id, name, opening, nodes)] for track, building_stations: [(name, nodes)].
+    [(way id, name, opening, nodes)] for track, building_stations: [(name, nodes)];
+    proposed: {name: [nodes]}, the railway=proposed track of the `proposers` operators.
     """
     stop_ids = {n for r in routes for n in r["stops"]}
     track_ids = {w for r in routes for w in r["ways"]}
-    out = {"stops": {}, "tracks": {}, "walk": [], "drive": [], "building": [], "building_stations": [],
+    out = {"stops": {}, "tracks": {}, "walk": [], "drive": [], "building": [], "building_stations": [], "proposed": defaultdict(list),
            "signals": {n.id for n in osmium.FileProcessor(str(PBF), osmium.osm.NODE)
                        .with_filter(osmium.filter.TagFilter(("highway", "traffic_signals")))}}
     fp = (
@@ -226,6 +230,8 @@ def read_osm(routes: list[dict], bbox, operators: set[str]) -> dict:
                 if kmh := drive_speed(t):
                     out["drive"].append((way, kmh, oneway(t), t.get("highway") not in NO_PARKING,
                                          t.get("highway") == "service"))
+        if t.get("railway") == "proposed" and t.get("operator") in proposers and "name" in t:
+            out["proposed"][t["name"]].append(nodes())
         if t.get("operator") not in operators:
             continue
         if t.get("construction:railway") == "station" or t.get("construction:public_transport") == "station":
@@ -435,6 +441,79 @@ def planned_lines(building: list, cfg: dict, net: dict) -> tuple[list[dict], dic
     return lines, track
 
 
+def smooth(points: np.ndarray, steps: int = 12) -> np.ndarray:
+    """A centripetal Catmull-Rom curve through the points (metric), for track drawn from a
+    plan's stations alone."""
+    if len(points) < 3:
+        return points
+    p = np.vstack([2 * points[0] - points[1], points, 2 * points[-1] - points[-2]])
+    out = [points[0]]
+    for k in range(1, len(p) - 2):
+        p0, p1, p2, p3 = p[k - 1:k + 3]
+        t0 = 0.0
+        t1 = t0 + np.linalg.norm(p1 - p0) ** 0.5
+        t2 = t1 + np.linalg.norm(p2 - p1) ** 0.5
+        t3 = t2 + np.linalg.norm(p3 - p2) ** 0.5
+        for t in np.linspace(t1, t2, steps + 1)[1:]:
+            a1 = (t1 - t) / (t1 - t0) * p0 + (t - t0) / (t1 - t0) * p1
+            a2 = (t2 - t) / (t2 - t1) * p1 + (t - t1) / (t2 - t1) * p2
+            a3 = (t3 - t) / (t3 - t2) * p2 + (t - t2) / (t3 - t2) * p3
+            b1 = (t2 - t) / (t2 - t0) * a1 + (t - t0) / (t2 - t0) * a2
+            b2 = (t3 - t) / (t3 - t1) * a2 + (t - t1) / (t3 - t1) * a3
+            out.append((t2 - t) / (t2 - t1) * b1 + (t - t1) / (t2 - t1) * b2)
+    return np.array(out)
+
+
+def project_lines(net: dict, specs: list[dict], proposed: dict, links: dict) -> tuple[list[dict], list[dict]]:
+    """A `projects` set's lines (projects.py) and their track features. Its new stations are
+    added to `specs`; a station it starts from or passes (no position given) is the open or
+    building one of that name, which then also lists the line."""
+    lines, feats = [], []
+    for line in PROJECTS[net["projects"]]:
+        ref, pts = line["ref"], []
+        for k, (name, pos) in enumerate(line["stations"]):
+            if pos is None:
+                known = next((s for s in specs if bare(s["name"]) == bare(name)), None)
+                if known is None:
+                    raise SystemExit(f"{line['name']}: no station {name!r} to join")
+                known["planned"] = sorted(set(known["planned"]) | {ref})
+                known["nets"] = sorted(set(known["nets"]) | {net["key"]})
+                # The track meets it at its platform nearest the line's neighbouring station.
+                other = line["stations"][1 if k == 0 else k - 1][1]
+                towards = metric([other])[0] if other else known["points"].mean(axis=0)
+                pts.append(known["points"][np.argmin(np.hypot(*(known["points"] - towards).T))])
+            else:
+                pts.append(metric([pos])[0])
+                add_station(specs, {"name": name, "lines": [], "planned": [ref], "nets": [net["key"]],
+                                    "points": pts[-1][None, :]}, links)
+        pts = np.array(pts)
+        ways = proposed.get(line.get("track"), [])
+        if ways:
+            track = shapely.ops.linemerge([shapely.LineString(metric([(x, y) for _, x, y in w])) for w in ways])
+            track = max(getattr(track, "geoms", [track]), key=lambda g: g.length)
+            a, b = (track.project(shapely.Point(p)) for p in (pts[0], pts[-1]))
+            coords = np.array(shapely.ops.substring(track, a, b).coords)
+            if a > b:
+                coords = coords[::-1]
+            # Join the stations the OSM track stops short of (ISMAI, the Dragão).
+            if math.dist(coords[0], pts[0]) > 20:
+                coords = np.vstack([pts[0], coords])
+            if math.dist(coords[-1], pts[-1]) > 20:
+                coords = np.vstack([coords, pts[-1]])
+        else:
+            if line.get("track"):
+                print(f"  {line['name']}: no OSM track {line['track']!r}, drawn through its stations")
+            coords = smooth(pts)
+        lon, lat = to_wgs.transform(coords[:, 0], coords[:, 1])
+        feats.append(feature(zip(lon, lat), ref=ref, c=line["colour"], k=0, net=net["key"], planned=True, proj=True))
+        shown = lambda name: next((k for k, names in links.items() if name in names), bare_name(name))
+        lines.append({"ref": ref, "label": ref, "name": line["name"],
+                      "ends": f"{shown(line['stations'][0][0])} – {shown(line['stations'][-1][0])}",
+                      "colour": line["colour"], "net": net["key"], "planned": True, "project": True,
+                      "status": line["status"], **{k: line[k] for k in ("km", "note") if line.get(k)}})
+    return lines, feats
+
+
 def bare_name(name: str) -> str:
     """Station name without a city prefix: 'Porto - Campanhã' -> 'Campanhã'."""
     return re.sub(r"^Porto\s*[-–]\s*", "", name)
@@ -560,7 +639,8 @@ def read_grid(region: str):
 
 
 def residents(area_metric: shapely.Geometry, cells, pop, tree) -> float:
-    area = shapely.transform(area_metric, lambda xy: np.column_stack(to_grid.transform(xy[:, 0], xy[:, 1])))
+    # Reprojecting can leave a thin sliver ring touching itself: repair before intersecting.
+    area = shapely.make_valid(shapely.transform(area_metric, lambda xy: np.column_stack(to_grid.transform(xy[:, 0], xy[:, 1]))))
     hit = tree.query(area, predicate="intersects")
     share = shapely.area(shapely.intersection(cells[hit], area)) / shapely.area(cells[hit])
     return float((pop[hit] * share).sum())
@@ -585,11 +665,12 @@ def feature(coords, **props) -> dict:
 def main(region: str) -> None:
     cfg = REGIONS[region]
     nets = cfg["transit"]
-    routes = {net["key"]: read_routes(net) for net in nets}
-    for net in nets:
-        print(f"{net['network']}: {len(routes[net['key']])} routes, lines {sorted({r['line'] for r in routes[net['key']]})}")
+    routes = {net["key"]: read_routes(net) for net in nets if not net.get("projects")}
+    for key, rs in routes.items():
+        print(f"{key}: {len(rs)} routes, lines {sorted({r['line'] for r in rs})}")
     osm = read_osm([r for rs in routes.values() for r in rs], cfg["bbox"],
-                   {net["network"] for net in nets if net.get("planned")})
+                   {net["network"] for net in nets if net.get("planned")},
+                   {net["proposed_operator"] for net in nets if net.get("proposed_operator")})
     stops, tracks = osm["stops"], osm["tracks"]
     shape = region_shape(region)
     near_region = shape.buffer(TRACK_MARGIN_M)
@@ -598,6 +679,11 @@ def main(region: str) -> None:
     lines, tracks_geojson, specs = [], [], []
     links = cfg.get("interchanges", {})
     for net in nets:
+        if net.get("projects"):
+            new_lines, feats = project_lines(net, specs, osm["proposed"], links)
+            lines += new_lines
+            tracks_geojson += feats
+            continue
         rs = routes[net["key"]]
         net_lines, on_way, orientation = build_lines(rs, tracks, stops, net)
         lines += net_lines
@@ -693,8 +779,23 @@ def main(region: str) -> None:
         })
 
     networks = []
+    building = {line["ref"] for line in lines if line.get("planned") and not line.get("project")}
+    metro_soon = [a for s, a in zip(stations, areas) if s["lines"] and "metro" in s["nets"] or set(s["planned"]) & building]
     for net in nets:
         key = net["key"]
+        if net.get("projects"):
+            # Planned lines: their new stations, the residents near all their stations, and the
+            # metro's reach with them (open and building lines too).
+            mine = [(s, a) for s, a in zip(stations, areas) if any(net_of[r] == key for r in s["planned"])]
+            info = {"key": key, "label": net["label"], "network": net["network"], "projects": True,
+                    "stations": sum(not s["lines"] and not set(s["planned"]) & building for s, _ in mine),
+                    "covered_pop": round(residents(shapely.union_all([a for _, a in mine]), cells, pop, tree)),
+                    "covered_pop_metro": round(residents(shapely.union_all(metro_soon + [a for _, a in mine]), cells, pop, tree))}
+            networks.append(info)
+            print(f"{net['network']}: {sum(line['net'] == key for line in lines)} lines, {info['stations']} new stations, "
+                  f"{info['covered_pop']} residents near their stations; metro with them: {info['covered_pop_metro']} "
+                  f"({100 * info['covered_pop_metro'] / pop.sum():.1f}%)")
+            continue
         open_ = [a for s, a in zip(stations, areas) if any(net_of[r] == key for r in s["lines"])]
         soon = [a for s, a in zip(stations, areas) if any(net_of[r] == key for r in s["lines"] + s["planned"])]
         info = {"key": key, "label": net["label"], "network": net["network"], "stations": len(open_),

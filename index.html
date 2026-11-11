@@ -126,6 +126,7 @@
     #transit-toggles input { margin: 0; accent-color: var(--ink); }
     #transit-toggles .swatch { flex: none; width: 22px; height: 6px; border-radius: 3px; align-self: center; }
     #transit-toggles .swatch.colours { background: linear-gradient(90deg, #3CAEEF 0 33%, #E62621 33% 66%, #8BC63E 66%); }
+    #transit-toggles .swatch.dots { background: radial-gradient(circle, var(--ink) 1.6px, transparent 1.9px) 0 50% / 5.5px 6px repeat-x; }
     #transit-toggles .swatch.rail { background: repeating-linear-gradient(90deg, var(--surface) 0 3px, var(--ink) 3px 7px); border: 1.5px solid var(--ink); }
     #transit-toggles p { margin: 6px 0 0 19px; font-size: 12px; color: var(--muted); }
     /* Donation link, in the yellow of Buy Me a Coffee */
@@ -154,6 +155,8 @@
     }
     /* Lines under construction: dashed outline badge, like their dashed track */
     .badge.planned { background: var(--surface); color: var(--ink); border: 2px dashed; }
+    /* Projected and proposed lines: dotted, like their track */
+    .badge.planned.proj { border-style: dotted; }
     /* Train frequency table: minutes between trains per line, by period */
     .freq { width: 100%; border-collapse: collapse; margin-top: 8px; font-size: 12px; font-variant-numeric: tabular-nums; }
     .freq th, .freq td { padding: 3px 0; text-align: right; font-weight: 400; }
@@ -372,6 +375,8 @@
           <a href="https://overturemaps.org">Overture Maps</a> and
           <a href="https://human-settlement.emergency.copernicus.eu">GHSL</a> ·
           rail lines, walking paths and roads from OpenStreetMap ·
+          planned lines from <a href="https://www.metrodoporto.pt/pages/630?news_id=488">Metro do Porto</a> and
+          <a href="https://mobilidade.cm-porto.pt/destaque/pmus-discussao-publica">Porto's PMUS</a> ·
           metro timetable from <a href="https://www.metrodoporto.pt/pages/337">Metro do Porto</a>`,
         // Cell panel
         perKm2: "residents / km²",
@@ -423,7 +428,21 @@
           return `${word ? `${word} line, ` : ""}${line.ends} · <i>under construction${opening ? `, opening ${opening}` : ""}</i>`;
         },
         underConstruction: "under construction",
-        nets: { Metro: "Metro", Trains: "Trains" },
+        nets: { Metro: "Metro", Trains: "Trains", "Projected metro": "Metro do Porto 3.0", PMUS: "Porto's PMUS" },
+        plannedWord: "planned",
+        futureProject: "Planned station: not under construction.",
+        projectLine: (line) => `${line.name.includes("–") ? line.name : `${line.name}, ${line.ends}`} · <i>${I18N.en.lineStatus[line.status] ?? line.status}</i>`,
+        lineStatus: {
+          eia: "Estudo Prévio under environmental assessment (public consultation Aug–Sep 2026)",
+          eia_trofa: "Estudo Prévio under environmental assessment (consultation Aug–Oct 2026); light rail to Muro, then a metroBus to Trofa (not shown)",
+          studies: "preliminary studies",
+          studies_mode: "preliminary studies; metro or metroBus still to be decided (the metro option is shown)",
+          pmus_build: "PMUS: to be built within the plan (5–10 years)",
+          pmus_design: "PMUS: designs to be drawn up within the plan",
+          pmus_study: "PMUS: link to be studied",
+          pmus_study_gondomar: "PMUS: link to be studied, continuing Gondomar II across the city",
+        },
+        toggleProject: (names, n, p, q, m) => `${names}: ${n} new stations · ${p}% of residents live within a ${m}-min walk of their stations; with them, the metro would reach ${q}%`,
         frequency: "Frequency",
         noTimetable: (names) => `No timetable for ${names} yet.`,
         trainsTotal: (n, net, several) => `<b>${n}</b> ${several ? `${net.label.toLowerCase()} trains` : "trains"}
@@ -452,6 +471,13 @@
         colResidents: "Residents",
         colPerKm: "Per km",
         colPerStation: "Per station",
+        colNew: "New",
+        groupHead: { metro_plan: "Projected by Metro do Porto (Metro 3.0)", pmus: "Proposed in Porto's PMUS" },
+        newReach: (n) => `<b>${n}</b> of them beyond a walk of any open metro station: residents it brings within reach.`,
+        newReachProject: (n) => `<b>${n}</b> of them beyond a walk of any open or building metro station: residents it would bring within reach.`,
+        lineNotes: {
+          matosinhos_2009: "The PMUS stops at Anémona, on Porto's boundary. On to Matosinhos Sul, along Rua de Brito Capelo, the line follows Metro do Porto's 2009 design for it, the only plan for the Matosinhos side.",
+        },
         coreHeading: (c) => `Inside and outside ${c}`,
         colStationsIn: (c) => `Stations in ${c}`,
         colResidentsIn: (c) => `Residents in ${c}`,
@@ -464,7 +490,8 @@
         underConstructionCap: "Under construction",
         linesTableNote: (c) => `Per station: the average of each station's own walking area. Neighbouring areas overlap,
           so stations close together share residents. Inside ${c}: the municipality (concelho) of ${c}; stations are counted
-          by where they stand. Network: all open lines together, each resident and place counted once.`,
+          by where they stand. Network: all open lines together, each resident and place counted once. New: residents a planned line would bring
+          within a walk of the metro, beyond the open stations (and, for projected and proposed lines, those being built).`,
         backToLines: "← All lines",
         sortHint: "Sort",
         sortBy: "Sort by",
@@ -516,6 +543,8 @@
           da <a href="https://overturemaps.org">Overture Maps</a> e do
           <a href="https://human-settlement.emergency.copernicus.eu">GHSL</a> ·
           linhas de metro e comboio, caminhos e estradas do OpenStreetMap ·
+          linhas previstas da <a href="https://www.metrodoporto.pt/pages/630?news_id=488">Metro do Porto</a> e do
+          <a href="https://mobilidade.cm-porto.pt/destaque/pmus-discussao-publica">PMUS do Porto</a> ·
           horários do <a href="https://www.metrodoporto.pt/pages/337">Metro do Porto</a>`,
         perKm2: "residentes / km²",
         residents: "Residentes",
@@ -563,7 +592,21 @@
         planned: (line, opening) =>
           `${/^Linha \S+$/.test(line.name) ? `${line.name}, ` : ""}${line.ends} · <i>em construção${opening ? `, abertura prevista para ${opening}` : ""}</i>`,
         underConstruction: "em construção",
-        nets: { Metro: "Metro", Trains: "Comboios" },
+        nets: { Metro: "Metro", Trains: "Comboios", "Projected metro": "Metro do Porto 3.0", PMUS: "PMUS do Porto" },
+        plannedWord: "previstas",
+        futureProject: "Estação prevista: ainda sem obra.",
+        projectLine: (line) => `${line.name.includes("–") ? line.name : `${line.name}, ${line.ends}`} · <i>${I18N.pt.lineStatus[line.status] ?? line.status}</i>`,
+        lineStatus: {
+          eia: "Estudo Prévio em avaliação de impacte ambiental (consulta pública de agosto a setembro de 2026)",
+          eia_trofa: "Estudo Prévio em avaliação de impacte ambiental (consulta de agosto a outubro de 2026); metro ligeiro até ao Muro e daí metroBus até à Trofa (não representado)",
+          studies: "estudos preliminares",
+          studies_mode: "estudos preliminares; metro ou metroBus ainda por decidir (mostra-se a opção metro)",
+          pmus_build: "PMUS: a construir no horizonte do plano (5 a 10 anos)",
+          pmus_design: "PMUS: projetos a elaborar no horizonte do plano",
+          pmus_study: "PMUS: ligação a estudar",
+          pmus_study_gondomar: "PMUS: ligação a estudar, prolongando a linha de Gondomar II através da cidade",
+        },
+        toggleProject: (names, n, p, q, m) => `${names}: ${n} novas estações · ${p}% dos residentes vivem a ${m} min a pé das suas estações; com elas, o metro chegaria a ${q}%`,
         frequency: "Frequência",
         noTimetable: (names) => `Ainda não há horários disponíveis (${names}).`,
         trainsTotal: (n, net) => `<b>${n}</b> passage${n === "1" ? "m" : "ns"} de ${net.key === "metro" ? "metro" : "comboio"}
@@ -590,6 +633,13 @@
         colResidents: "Residentes",
         colPerKm: "Por km",
         colPerStation: "Por estação",
+        colNew: "Novos",
+        groupHead: { metro_plan: "Previstas pela Metro do Porto (Metro 3.0)", pmus: "Propostas no PMUS do Porto" },
+        newReach: (n) => `<b>${n}</b> deles fora do alcance a pé de qualquer estação de metro aberta: residentes que passa a servir.`,
+        newReachProject: (n) => `<b>${n}</b> deles fora do alcance a pé de qualquer estação de metro aberta ou em obra: residentes que passaria a servir.`,
+        lineNotes: {
+          matosinhos_2009: "O PMUS termina na Anémona, no limite do Porto. Daí até Matosinhos Sul, pela Rua de Brito Capelo, a linha segue o projeto de 2009 da Metro do Porto, o único plano para o lado de Matosinhos.",
+        },
         coreHeading: (c) => `Dentro e fora do ${c}`,
         colStationsIn: (c) => `Estações no ${c}`,
         colResidentsIn: (c) => `Residentes no ${c}`,
@@ -602,7 +652,8 @@
         underConstructionCap: "Em construção",
         linesTableNote: (c) => `Por estação: média da área a pé de cada estação. As áreas de estações vizinhas sobrepõem-se,
           por isso estações próximas partilham residentes. No ${c}: dentro do concelho do ${c}; as estações contam pelo
-          sítio onde ficam. Rede: todas as linhas abertas em conjunto, cada residente e cada local contados uma só vez.`,
+          sítio onde ficam. Rede: todas as linhas abertas em conjunto, cada residente e cada local contados uma só vez. Novos: residentes que uma
+          linha planeada passaria a ter a pé do metro, além das estações abertas (e, nas linhas previstas e propostas, das em obra).`,
         backToLines: "← Todas as linhas",
         sortHint: "Ordenar",
         sortBy: "Ordenar por",
@@ -811,10 +862,11 @@
     // bundle. Railway networks (trains) are drawn in one railway style instead, so their
     // parallel tracks read as one corridor. Lines under construction are dashed, future
     // stations grey.
-    const TRACK_LAYERS = ["transit-casing", "transit-lines", "transit-rail", "transit-ties", "transit-planned"];
+    const TRACK_LAYERS = ["transit-casing", "transit-lines", "transit-rail", "transit-ties", "transit-planned", "transit-projected"];
     const STATION_LAYERS = ["station-links-casing", "station-links", "stations"];
     const PLANNED = ["boolean", ["get", "planned"], false];
     const RAIL = ["boolean", ["get", "rail"], false];
+    const PROJ = ["boolean", ["get", "proj"], false]; // projected or proposed, not yet building
     const shown = new Set(); // keys of the networks switched on
 
     // Track pieces of the networks switched on; stations served by any of them.
@@ -826,7 +878,8 @@
       map.setFilter("transit-lines", trackFilter(["!", PLANNED], ["!", RAIL]));
       map.setFilter("transit-rail", trackFilter(RAIL));
       map.setFilter("transit-ties", trackFilter(RAIL));
-      map.setFilter("transit-planned", trackFilter(PLANNED));
+      map.setFilter("transit-planned", trackFilter(PLANNED, ["!", PROJ]));
+      map.setFilter("transit-projected", trackFilter(PROJ));
       for (const id of STATION_LAYERS) map.setFilter(id, stationFilter());
       map.setFilter("station-labels", ["all", stationFilter(), ["boolean", ["get", "label"], false]]);
     }
@@ -868,6 +921,9 @@
         paint: { "line-color": surface, "line-width": byZoom(0.6, 1.2, 2.2), "line-dasharray": [3, 3] } }, labelsStart);
       map.addLayer({ id: "transit-planned", type: "line", source: "transit", layout: { ...round, "line-cap": "butt" },
         paint: { "line-color": ["get", "c"], "line-width": byZoom(...LINE_W), "line-dasharray": [2, 1.2] } }, labelsStart);
+      // Projected and proposed lines: round dots.
+      map.addLayer({ id: "transit-projected", type: "line", source: "transit", layout: round,
+        paint: { "line-color": ["get", "c"], "line-width": byZoom(...LINE_W), "line-dasharray": [0.1, 1.9] } }, labelsStart);
 
       // An interchange whose stations stand apart (metro and train platforms, a future
       // line's station) gets a marker at each, joined by a capsule-shaped connector, the
@@ -963,7 +1019,7 @@
       const exact = transit.lines.find((l) => l.ref === ref);
       const line = exact ?? transit.lines.find((l) => ref.startsWith(l.ref));
       const text = exact ? line.label : ref;
-      if (line.planned) return `<span class="badge planned" style="border-color:${line.colour}">${text}</span>`;
+      if (line.planned) return `<span class="badge planned${line.project ? " proj" : ""}" style="border-color:${line.colour}">${text}</span>`;
       const [r, g, b] = [1, 3, 5].map((k) => parseInt(line.colour.slice(k, k + 2), 16) / 255);
       const light = 0.2126 * r + 0.7152 * g + 0.0722 * b > 0.55;
       return `<span class="badge" style="background:${line.colour};color:${light ? "#1a1a19" : "#ffffff"}">${text}</span>`;
@@ -1011,7 +1067,7 @@
       const w = transit.walk;
       const item = (ref) => {
         const line = lineOf(ref);
-        const label = line.planned ? t("planned", line, line.opening) : line.ends;
+        const label = line.project ? t("projectLine", line) : line.planned ? t("planned", line, line.opening) : line.ends;
         return `<li>${badge(ref)} <span>${label}</span></li>`;
       };
       // Lines grouped by network: "Metro", "Trains (CP Porto)".
@@ -1019,13 +1075,14 @@
         const refs = [...s.lines, ...s.planned].filter((r) => lineOf(r).net === n.key);
         if (!refs.length) return "";
         const names = networkNames(n, refs).join(", ");
-        const title = names.includes(n.label) ? netLabel(n) : `${netLabel(n)} (${names})`;
+        const title = n.projects || names.includes(n.label) ? netLabel(n) : `${netLabel(n)} (${names})`;
         return `<h2>${title}</h2><ul class="line-list">${refs.map(item).join("")}</ul>`;
       }).join("");
       const future = s.lines.length === 0;
+      const building = s.planned.some((r) => !lineOf(r).project); // else only planned lines call here
       document.getElementById("panel-body").innerHTML = `
         <div class="station-name">${s.name}</div>
-        ${future ? `<p class="note" style="margin:-4px 0 8px">${t("future")}${s.approx ? t("approx") : ""}</p>` : ""}
+        ${future ? `<p class="note" style="margin:-4px 0 8px">${t(building ? "future" : "futureProject")}${s.approx ? t("approx") : ""}</p>` : ""}
         <div class="hero">${fmtInt.format(s.pop)} <small>${t("walkHero", w.minutes)}</small></div>
         <dl class="rows">
           <dt>${t("walkArea")}</dt><dd>${fmt1.format(s.km2)} km²</dd>
@@ -1122,6 +1179,12 @@
     }
 
     function selectLine(ref) {
+      const net = ref && lineOf(ref).net;
+      if (net && !shown.has(net)) { // a planned set switched off: switch it on to show the line
+        shown.add(net);
+        renderToggles();
+        applyNetworkFilters();
+      }
       lineSel = ref;
       highlightLine(ref);
       renderLines();
@@ -1137,10 +1200,15 @@
     const num = (v) => (v == null || !isFinite(v) ? "–" : fmtInt.format(v));
     const tierCounts = (f) => [0, 1, 2].map((k) => f.pois.filter((p) => p[1] === k).length);
 
-    // Three tables, one row per line: open lines, the whole network, then lines under construction.
+    // Three tables, one row per line: open lines, the whole network, then lines under construction,
+    // projected by Metro do Porto and proposed in the PMUS.
     function linesOverview() {
       const refs = Object.keys(lines.lines);
-      const open = refs.filter((r) => !lineOf(r).planned), soon = refs.filter((r) => lineOf(r).planned);
+      const open = refs.filter((r) => !lineOf(r).planned);
+      const groups = [
+        [t("underConstructionCap"), refs.filter((r) => lineOf(r).planned && !lineOf(r).project)],
+        ...transit.networks.filter((n) => n.projects).map((n) => [t("groupHead")[n.key] ?? netLabel(n), refs.filter((r) => lineOf(r).net === n.key)]),
+      ].filter(([, rs]) => rs.length);
       const total = lines.networks[lineOf(refs[0]).net];
       const core = lines.core;
       const max = Math.max(...refs.map((r) => lines.lines[r].pop));
@@ -1167,7 +1235,7 @@
           <tbody>
             ${order(open).map(row).join("")}
             <tr class="total"><th>${t("network")}</th>${cols.map((c) => td(c[1](total, null))).join("")}</tr>
-            ${soon.length ? `<tr class="sep"><th colspan="${cols.length + 1}">${t("underConstructionCap")}</th></tr>${order(soon).map(row).join("")}` : ""}
+            ${groups.map(([head, rs]) => `<tr class="sep"><th colspan="${cols.length + 1}">${head}</th></tr>${order(rs).map(row).join("")}`).join("")}
           </tbody>
         </table>`;
       };
@@ -1182,6 +1250,7 @@
           [t("colResidents"), (f, r) => num(f.pop) + (r ? bar(f.pop, r) : ""), (f) => f.pop],
           [t("colPerKm"), (f) => num(perKm(f)), perKm],
           [t("colPerStation"), (f) => num(f.avg), (f) => f.avg],
+          [t("colNew"), (f) => num(f.pop_new), (f) => f.pop_new],
         ])}
         <h2>${t("coreHeading", core)}</h2>
         ${table("core", [
@@ -1211,8 +1280,10 @@
       return `
         <button type="button" class="back" data-back>${t("backToLines")}</button>
         <div class="station-name line-title">${badge(ref)} <span>${line.name}</span></div>
-        <p class="note" style="margin:-4px 0 8px">${line.planned ? t("planned", line, line.opening) : line.ends}</p>
+        <p class="note" style="margin:-4px 0 8px">${line.project ? t("projectLine", line) : line.planned ? t("planned", line, line.opening) : line.ends}</p>
         <div class="hero">${num(f.pop)} <small>${t("lineHero", lines.walk_minutes)}</small></div>
+        ${f.pop_new != null ? `<p class="note" style="margin-top:2px">${t(line.project ? "newReachProject" : "newReach", num(f.pop_new))}</p>` : ""}
+        ${line.note ? `<p class="note">${t("lineNotes")[line.note]}</p>` : ""}
         <dl class="rows">
           <dt>${t("stationsWord")}</dt><dd>${f.stations}</dd>
           <dt>${t("length")}</dt><dd>${fmt1.format(f.km)} km</dd>
@@ -1385,8 +1456,11 @@
       tipFor = hit.id;
       const s = transit.stations[hit.id];
       const labels = (refs) => refs.map((r) => lineOf(r).label).join(" ");
-      const soon = s.planned.length ? `${s.lines.length ? " + " : ""}${labels(s.planned)} ${t("underConstruction")}` : "";
-      tip.setLngLat([s.lon, s.lat]).setHTML(`<b>${s.name}</b> · ${labels(s.lines)}${soon}`).addTo(map);
+      // "A B + G under construction + SM planned"
+      const building = s.planned.filter((r) => !lineOf(r).project), projected = s.planned.filter((r) => lineOf(r).project);
+      const parts = [labels(s.lines), building.length && `${labels(building)} ${t("underConstruction")}`,
+        projected.length && `${labels(projected)} ${t("plannedWord")}`].filter(Boolean);
+      tip.setLngLat([s.lon, s.lat]).setHTML(`<b>${s.name}</b> · ${parts.join(" + ")}`).addTo(map);
     });
     map.on("click", (ev) => {
       const st = stationAt(ev.point);
@@ -1520,6 +1594,13 @@
       const pct = (v) => Math.round((100 * v) / transit.total_pop);
       const minutes = transit.walk.minutes;
       const rows = transit.networks.map((n) => {
+        if (n.projects) { // planned lines: their names, new stations and what the metro would reach
+          const names = [...new Set(transit.lines.filter((l) => l.net === n.key)
+            .map((l) => l.name.replace(/^Linha (d[aeo]s? )?/, "").replace(/:.*$/, "")))];
+          return `<label><input type="checkbox" data-net="${n.key}" ${shown.has(n.key) ? "checked" : ""}>
+            <i class="swatch dots"></i><span>${t("toggleProject", `${t("nets")[n.label] ?? n.network} (${names.join(", ")})`,
+              n.stations, pct(n.covered_pop), pct(n.covered_pop_metro), minutes)}</span></label>`;
+        }
         const building = transit.lines.filter((l) => l.net === n.key && l.planned).map((l) => t("plannedName", l));
         const extra = transit.lines.filter((l) => l.net === n.key && l.network).map((l) => `${l.network} (${l.label})`);
         const text = t("toggle", [n.network, ...extra].join(", "), n.stations, pct(n.covered_pop), minutes) +

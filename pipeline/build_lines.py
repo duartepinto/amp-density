@@ -5,11 +5,14 @@ municipality (Porto) and outside it, and the points of interest within a walk of
 - Stations of a line: those it serves; for a line under construction, those it will serve.
 - Residents served: those within WALK_MINUTES of any of the line's stations (the union of
   their walking areas, so nobody counts twice), from the grid as in build_transit.py.
+- New (planned lines): residents served who live beyond a walk of every open metro station
+  and, for a projected line, of every one being built too: those it would bring within reach.
 - Per station: the mean of each station's own walking-area residents (areas overlap, so
   these add up to more than the line's total). Inside/outside the core: by where the
   station stands.
 - Per km: residents served ÷ the line's length, along one direction of travel (for a line
-  under construction, whose track OSM maps for both directions, the parallel track is dropped).
+  under construction, whose track OSM maps for both directions, the parallel track is dropped;
+  for a projected line, its official length where the plan gives one).
 - Points of interest from OpenStreetMap, ranked by the trips they draw (POI rules below).
   One counts for a line when it reaches into the walking area of one of its stations.
 
@@ -192,7 +195,10 @@ def track_km(features: list[dict], parallel: bool = False) -> float:
     return sum(g.length for g in kept) / 1000
 
 
-def figures(stations: list[dict], areas: list, km: float, core: shapely.Geometry, grid, pois: list[dict]) -> dict:
+def figures(stations: list[dict], areas: list, km: float, core: shapely.Geometry, grid, pois: list[dict],
+            reached: shapely.Geometry | None = None) -> dict:
+    """A line's figures; with `reached` (the area the network already reaches), also the
+    residents it would newly reach."""
     cells, pop, tree = grid
     union = shapely.union_all(areas)
     in_core = [bool(core.contains(shapely.Point(metric([(s["lon"], s["lat"])])[0]))) for s in stations]
@@ -213,6 +219,7 @@ def figures(stations: list[dict], areas: list, km: float, core: shapely.Geometry
         "stations": len(stations), "stations_core": sum(in_core), "km": round(km, 1),
         "pop": round(served), "pop_core": round(served_core),
         "avg": mean(pops), "avg_core": mean(pops[in_core]), "avg_out": mean(pops[~np.array(in_core)]),
+        **({"pop_new": round(residents(union.difference(reached), cells, pop, tree))} if reached is not None else {}),
         "pois": found,
     }
 
@@ -233,6 +240,14 @@ def main(region: str) -> None:
     out = {"core": cfg["core"]["name"], "walk_minutes": transit["walk"]["minutes"],
            "rules": {"large_hospital_ha": LARGE_HOSPITAL_HA, "mall_ha": MALL_HA, "park_ha": PARK_HA},
            "networks": {}, "lines": {}}
+    # What the metro reaches today, and once the lines being built open: planned lines are
+    # measured by the residents they add to these.
+    lines_by_ref = {l["ref"]: l for l in transit["lines"]}
+    building = {r for r, l in lines_by_ref.items() if l.get("planned") and not l.get("project")}
+    stations = transit["stations"]
+    on_metro = [i for i, s in enumerate(stations) if any(lines_by_ref[r]["net"] == "metro" for r in s["lines"])]
+    reach_open = shapely.union_all([areas[i] for i in on_metro])
+    reach_building = shapely.union_all([areas[i] for i, s in enumerate(stations) if i in on_metro or set(s["planned"]) & building])
     for key in keys:
         open_ = set()
         for line in (l for l in transit["lines"] if l["net"] == key):
@@ -241,15 +256,19 @@ def main(region: str) -> None:
             feats = [f for f in transit["tracks"]["features"]
                      if f["properties"]["net"] == key and f["properties"]["ref"] == ref
                      and bool(f["properties"].get("planned")) == planned]
-            km = track_km(feats, parallel=planned)
-            f = figures([transit["stations"][i] for i in idx], [areas[i] for i in idx], km, core, grid, pois)
+            km = line.get("km") or track_km(feats, parallel=planned)
+            reached = None if not planned else reach_building if line.get("project") else reach_open
+            f = figures([transit["stations"][i] for i in idx], [areas[i] for i in idx], km, core, grid, pois, reached)
             f["area"] = lonlat_rings(shapely.union_all([areas[i] for i in idx]).simplify(AREA_SIMPLIFY_M))
             out["lines"][ref] = f
             if not planned:
                 open_.update(idx)
             print(f"{line['name']:<11} {f['stations']:>3} stations {f['km']:>5} km {f['pop']:>7} residents "
-                  f"({f['pop_core']} in {cfg['core']['name']}), {f['pop'] / km:>6.0f}/km, {f['avg']}/station, "
+                  f"({f['pop_core']} in {cfg['core']['name']}{', %d new' % f['pop_new'] if 'pop_new' in f else ''}), "
+                  f"{f['pop'] / km:>6.0f}/km, {f['avg']}/station, "
                   f"POIs {[sum(p[1] == t for p in f['pois']) for t in range(3)]}")
+        if not open_:
+            continue  # projected lines only: no network yet
         idx = sorted(open_)
         feats = [f for f in transit["tracks"]["features"] if f["properties"]["net"] == key and not f["properties"].get("planned")]
         f = figures([transit["stations"][i] for i in idx], [areas[i] for i in idx], track_km(feats), core, grid, pois)

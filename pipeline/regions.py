@@ -19,6 +19,8 @@ OSM by its route relations' `network` tag:
   line_stats  figures per line in the Lines view (build_lines.py)
   planned  lines under construction: OSM has their track (railway=construction, tagged
            with the line's `name` and the network as `operator`) but no routes yet
+  projects instead of OSM routes, a set of planned lines in projects.py (stations placed by
+           hand from the plans; track from OSM railway=proposed where mapped)
 `interchanges` names connected stations whose names differ: {shown name: [station names]}.
 `core` is the central municipality (its name and census DTMN21 code): the Lines view splits
 residents inside and outside it.
@@ -55,6 +57,25 @@ REGIONS = {
                 },
             },
             {
+                # Metro do Porto 3.0: Gondomar II, ISMAI-Muro (Trofa), São Mamede, Maia II.
+                "key": "metro_plan",
+                "label": "Projected metro",
+                "network": "Metro do Porto 3.0",
+                "projects": "metro_3_0",
+                "proposed_operator": "Metro do Porto",  # whose railway=proposed track to use
+                "badge": "ref",
+                "line_stats": True,
+            },
+            {
+                # Porto's mobility plan (PMUS, 2026): Campo Alegre, Rosa and Rubi extensions.
+                "key": "pmus",
+                "label": "PMUS",
+                "network": "PMUS",
+                "projects": "pmus",
+                "badge": "ref",
+                "line_stats": True,
+            },
+            {
                 "key": "train",
                 "label": "Trains",
                 "network": "CP Porto",
@@ -72,6 +93,12 @@ REGIONS = {
         "core": {"name": "Porto", "code": "1312"},
         "interchanges": {
             "Gaia - Devesas": ["Gaia", "Devesas"],  # CP Gaia station is Devesas; Rubi's stop connects
+            # Projected lines' stations at open ones (projects.py)
+            "IPO": ["IPO", "IPO II"],
+            "Senhora da Hora": ["Senhora da Hora", "Senhora da Hora II"],
+            "Verdes": ["Verdes", "Os Verdes II"],
+            "Parque Maia": ["Parque Maia", "Parque Maia II"],
+            "Matosinhos Sul": ["Matosinhos Sul", "Matosinhos Sul II"],
         },
     },
     "aml": {
