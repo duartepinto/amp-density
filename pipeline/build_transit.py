@@ -31,7 +31,10 @@ The drive ends on the roads within SNAP_M of the station (not motorways), and ho
 within DRIVE_REACH_M of a reached road count as reached.
 
 Frequencies: trains per hour by period, counted from the operator's GTFS timetables
-(data/raw/gtfs/<file>, per network, optional) at each station, matched by location.
+(data/raw/gtfs/<file>, per network, optional) at each station, matched by location. Where
+there is a timetable it also says where each line runs: OSM routes can be out of date (line
+F's still start at Senhor de Matosinhos), so a line is kept only at the stations it calls at
+and drawn only between its first and last of them.
 
 Input:  data/raw/osm/portugal-latest.osm.pbf, data/raw/<region>/bgri2021.gpkg,
         data/<region>.js (run build_grid.py first), data/raw/gtfs/*.zip
@@ -84,6 +87,7 @@ PERIODS = [
     ("Sun", "sunday", 10, 19),
 ]
 GTFS_MATCH_M = 300  # a GTFS stop belongs to the station within this distance
+CALLS_M = 150  # a line calls at a station when the timetable has it stop this close
 NOT_WALKABLE = {"motorway", "motorway_link", "construction", "proposed", "raceway", "bus_guideway", "abandoned"}
 # Driving to a station (networks with `drive_minutes`): free-flow speeds in km/h by road
 # class, OSRM's car profile; a tagged maxspeed counts at 80%. Plus time lost at junctions
@@ -372,18 +376,21 @@ def orient_ways(route: dict, tracks: dict) -> dict[int, int]:
     return out
 
 
-def line_names(route: dict, stops: dict) -> tuple[str, str]:
+def line_names(route: dict, stops: dict, served: np.ndarray | None = None) -> tuple[str, str]:
     """('Linha A', 'Senhor de Matosinhos – Estádio do Dragão'): the line from the route's
-    name, its ends from its first and last named stops (route names carry typos)."""
+    name, its ends from its first and last named stops (route names carry typos); with a
+    timetable (`served`), its first and last stops there."""
     head, _, ends = route["name"].partition(":")
-    names = [bare_name(stops[n][0]) for n in route["stops"] if n in stops and stops[n][0]]
+    calls = lambda n: served is None or np.hypot(*(served - metric([stops[n][1:]])[0]).T).min() < CALLS_M
+    names = [bare_name(stops[n][0]) for n in route["stops"] if n in stops and stops[n][0] and calls(n)]
     if len(names) >= 2:
         ends = f"{names[0]} – {names[-1]}"
     return route["line_name"] or head.strip(), re.sub(r"\s*(⇒|=>|->)\s*", " – ", ends.strip())
 
 
-def build_lines(routes: list[dict], tracks: dict, stops: dict, net: dict) -> tuple[list[dict], dict, dict]:
+def build_lines(routes: list[dict], tracks: dict, stops: dict, net: dict, calls: dict) -> tuple[list[dict], dict, dict]:
     """One direction of travel per line, oriented consistently where lines share track.
+    With a timetable (`calls`), a line is drawn only between its first and last stops in it.
 
     Returns the lines, {way: [line refs]} and {way: +1/-1}.
     """
@@ -399,11 +406,22 @@ def build_lines(routes: list[dict], tracks: dict, stops: dict, net: dict) -> tup
             agree = sum(o[w] == orientation[w] for w in shared) - sum(o[w] != orientation[w] for w in shared)
             return agree, len(shared), route["ref"] == line  # the line's own routes over variants
         best = max(by_line[line], key=fit)
-        for w, sign in orient_ways(best, tracks).items():
+        kept = orient_ways(best, tracks)
+        served = line_calls(calls, line)
+        if served is not None and kept:
+            path = shapely.LineString(np.vstack([metric([(x, y) for _, x, y in tracks[w]][::kept[w]]) for w in kept]))
+            along = [path.project(shapely.Point(p)) for p in served]
+            lo, hi = min(along) - 50, max(along) + 50
+            mid = {w: path.project(shapely.Point(metric([tracks[w][len(tracks[w]) // 2][1:]])[0])) for w in kept}
+            cut = [w for w in kept if not lo <= mid[w] <= hi]
+            if cut:
+                print(f"  {line}: {len(cut)} track ways beyond its timetabled stops left out")
+            kept = {w: sign for w, sign in kept.items() if w not in cut}
+        for w, sign in kept.items():
             orientation.setdefault(w, sign)
             if line not in on_way[w]:
                 on_way[w].append(line)
-        name, ends = line_names(best, stops)
+        name, ends = line_names(best, stops, served)
         place = re.sub(r"^.*Linha (d[aeo]s? )?", "", best["master_name"])
         lines.append({"ref": line, "label": line if net["badge"] == "ref" else place, "name": name,
                       "ends": ends, "colour": best["colour"], "net": net["key"],
@@ -553,9 +571,10 @@ def add_station(specs: list[dict], spec: dict, interchanges: dict) -> None:
         same["name"] = spec["name"]
 
 
-def network_stations(routes: list[dict], stops: dict, net: dict) -> list[dict]:
+def network_stations(routes: list[dict], stops: dict, net: dict, calls: dict) -> list[dict]:
     """In-service stations: the routes' stop positions grouped by name. Unnamed stop
-    positions join the nearest named one within NAME_JOIN_M, or are dropped."""
+    positions join the nearest named one within NAME_JOIN_M, or are dropped. With a
+    timetable (`calls`), a line is listed only where it stops within CALLS_M."""
     served = defaultdict(set)
     for r in routes:
         for n in r["stops"]:
@@ -572,9 +591,37 @@ def network_stations(routes: list[dict], stops: dict, net: dict) -> list[dict]:
     groups = defaultdict(list)
     for n, name in name_of.items():
         groups[name].append(n)
-    return [{"name": name, "lines": sorted({line for n in ns for line in served[n]}), "planned": [],
-             "nets": [net["key"]], "points": metric(sorted({stops[n][1:] for n in ns}))}
-            for name, ns in sorted(groups.items())]
+    out = []
+    for name, ns in sorted(groups.items()):
+        pts = metric(sorted({stops[n][1:] for n in ns}))
+        lines = set()
+        for line in {line for n in ns for line in served[n]}:
+            at = line_calls(calls, line)
+            if at is None or np.hypot(*(pts[:, None, :] - at[None, :, :]).transpose(2, 0, 1)).min() < CALLS_M:
+                lines.add(line)
+            else:
+                print(f"  {name}: line {line} does not stop here in the timetable, left out")
+        out.append({"name": name, "lines": sorted(lines), "planned": [], "nets": [net["key"]], "points": pts})
+    return out
+
+
+def timetable_calls(path: Path) -> dict[str, np.ndarray]:
+    """Where each route of a GTFS timetable stops: {route short name: metric points}."""
+    z = zipfile.ZipFile(path)
+    read = lambda name: csv.DictReader(io.StringIO(z.read(name).decode("utf-8-sig")))
+    routes = {r["route_id"]: r["route_short_name"] for r in read("routes.txt")}
+    at = {s["stop_id"]: (float(s["stop_lon"]), float(s["stop_lat"])) for s in read("stops.txt")}
+    route_of = {t["trip_id"]: routes[t["route_id"]] for t in read("trips.txt")}
+    calls = defaultdict(set)
+    for st in read("stop_times.txt"):
+        calls[route_of[st["trip_id"]]].add(at[st["stop_id"]])
+    return {r: metric(sorted(p)) for r, p in calls.items()}
+
+
+def line_calls(calls: dict[str, np.ndarray], line: str) -> np.ndarray | None:
+    """A line's stops in the timetable, its variants' included (Bx, the B express, with B)."""
+    pts = [p for r, p in calls.items() if re.fullmatch(rf"{re.escape(line)}[a-z]*", r)]
+    return np.vstack(pts) if pts else None
 
 
 def frequencies(path: Path, stations: list[dict], points: list[np.ndarray], key: str) -> dict:
@@ -685,7 +732,9 @@ def main(region: str) -> None:
             tracks_geojson += feats
             continue
         rs = routes[net["key"]]
-        net_lines, on_way, orientation = build_lines(rs, tracks, stops, net)
+        gtfs = ROOT / "data/raw/gtfs" / net.get("gtfs", "-")
+        calls = timetable_calls(gtfs) if net.get("gtfs") and gtfs.exists() else {}
+        net_lines, on_way, orientation = build_lines(rs, tracks, stops, net, calls)
         lines += net_lines
         colour = {line["ref"]: line["colour"] for line in net_lines}
         for w, refs in on_way.items():
@@ -697,7 +746,7 @@ def main(region: str) -> None:
                 continue
             for k, ref in enumerate(sorted(refs)):
                 tracks_geojson.append(feature(coords, ref=ref, c=colour[ref], k=k - (len(refs) - 1) / 2, net=net["key"]))
-        for spec in network_stations(rs, stops, net):
+        for spec in network_stations(rs, stops, net, calls):
             if shape.distance(shapely.Point(spec["points"].mean(axis=0))) < 200:
                 add_station(specs, spec, links)
 

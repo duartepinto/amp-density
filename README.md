@@ -241,6 +241,8 @@ Senhora da Hora II, Os Verdes II, Parque Maia II, Matosinhos Sul II) are listed 
 - **Beyond Porto:** the PMUS stops at the city boundary. Campo Alegre continues from Anémona to
   Matosinhos Sul along Rua de Brito Capelo as in Metro do Porto's 2009 design of the line (EIA,
   SIAIA AIA2063), the only plan for that side; Matosinhos's own current project there is a metroBus.
+- **New stations** in the toggles are the plans' stations at new sites; a planned platform at or
+  beside an open one (IPO II, Senhora da Hora II…) is counted as part of that station.
 - **Coverage:** with Metro do Porto 3.0, 23.0% of AMP residents would live within a 10-minute walk
   of the metro (16.5% today, 18.1% with Rosa and Rubi); with the PMUS lines, 22.5%. In the lines
   view, **New** is the residents a planned line brings within a walk of the metro beyond the open
@@ -290,6 +292,11 @@ departing are counted per line and direction:
 - The **All** row is all lines together, per direction; the headline is all trains in both
   directions at weekday peak (Trindade: 73 an hour).
 - Holiday-only services (`calendar_dates.txt` additions) are left out.
+- **Where lines run:** OSM routes can be out of date, so where a network has a timetable a line is
+  listed only at the stations it calls at (a timetabled stop within 150 m), and drawn only between
+  its first and last of them. This drops line F from the nine stations Senhor de Matosinhos –
+  Vasco da Gama: OSM's F routes still start at Senhor de Matosinhos, but F trains run
+  Senhora da Hora – Fânzeres (24 stations, as in the timetable).
 - GTFS stops are matched to stations by location (within 300 m of a stop position), because a few
   names are spelled differently.
 - The panel shows the feed's validity dates. The current feed covers 7 Sep – 25 Oct 2026; refresh it
@@ -320,7 +327,7 @@ stations and walking areas in `data/amp_transit.js`:
 
 | Rank | What |
 |---|---|
-| High | hospitals of 3 ha or more (São João, Santo António, IPO, Gaia…), the airport (`aeroway=aerodrome` with an IATA code), stations where long-distance trains stop (stops of OSM's `CP Longo Curso` routes: Campanhã, Gaia, Espinho, Trofa, Santo Tirso) |
+| High | hospitals of 3 ha or more (São João, Santo António, IPO, Gaia…), the airport (`aeroway=aerodrome` with an IATA code; it counts by its terminal buildings, not its 317 ha of runways and fences, which reach Verdes), stations where long-distance trains stop (stops of OSM's `CP Longo Curso` routes: Campanhã, Gaia, Espinho, Trofa, Santo Tirso) |
 | Medium | higher education (`amenity=university`: each faculty), other hospitals (outlines of 0.1 ha or more), shopping centres of 1 ha or more, stadiums, exhibition, conference and concert venues with a Wikidata entry |
 | Low | museums, galleries, theatres, arts centres, zoos, theme parks and markets with a Wikidata entry; sights (`tourism=attraction`) with a Wikipedia article, which leaves out the many listed fountains, trees and pillories; parks of 5 ha or more |
 

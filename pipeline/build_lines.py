@@ -60,7 +60,7 @@ POI_TAGS = [
     ("leisure", "stadium"), ("amenity", "exhibition_centre"), ("amenity", "conference_centre"),
     ("amenity", "concert_hall"), ("tourism", "museum"), ("tourism", "gallery"), ("tourism", "attraction"),
     ("amenity", "theatre"), ("amenity", "arts_centre"), ("tourism", "zoo"), ("tourism", "theme_park"),
-    ("amenity", "marketplace"), ("leisure", "park"),
+    ("amenity", "marketplace"), ("leisure", "park"), ("aeroway", "terminal"),
 ]
 
 
@@ -71,7 +71,7 @@ def classify(tags, area_ha: float, is_point: bool) -> tuple[int, str] | None:
         if area_ha >= LARGE_HOSPITAL_HA:
             return HIGH, "hospital"
         return (MEDIUM, "hospital") if is_point or area_ha >= MIN_HOSPITAL_HA else None
-    if get("aeroway") == "aerodrome":
+    if get("aeroway") == "aerodrome":  # it counts by its terminals (see read_pois)
         return (HIGH, "airport") if "iata" in tags else None
     if get("amenity") == "university":
         return MEDIUM, "education"
@@ -101,7 +101,7 @@ def classify(tags, area_ha: float, is_point: bool) -> tuple[int, str] | None:
 def read_pois(shape: shapely.Geometry) -> list[dict]:
     """Points of interest inside the region (METRIC_CRS geometries), one per place."""
     wkb = osmium.geom.WKBFactory()
-    found = []
+    found, terminals = [], []
     fp = (osmium.FileProcessor(str(PBF)).with_areas(osmium.filter.TagFilter(*POI_TAGS)).with_locations()
           .with_filter(osmium.filter.TagFilter(*POI_TAGS)))
     for o in fp:
@@ -114,15 +114,25 @@ def read_pois(shape: shapely.Geometry) -> list[dict]:
             geom = shapely.Point(o.location.lon, o.location.lat)
         else:
             continue
+        geom_m = lambda: shapely.transform(geom, lambda xy: metric(xy))
+        if o.tags.get("aeroway") == "terminal":
+            terminals.append(geom_m())
+            continue
         name = o.tags.get("name")
         if not name:
             continue
-        geom = shapely.transform(geom, lambda xy: metric(xy))
+        geom = geom_m()
         if not shape.contains(geom.centroid):
             continue
         kind = classify(o.tags, geom.area / 1e4, o.is_node())
         if kind:
             found.append({"name": name, "tier": kind[0], "kind": kind[1], "geom": geom})
+    # An airport is reached at its terminals, not anywhere along its runways and fences.
+    for p in found:
+        if p["kind"] == "airport":
+            inside = [t for t in terminals if p["geom"].contains(t.centroid)]
+            if inside:
+                p["geom"] = shapely.union_all(inside)
     found += long_distance_stations(shape)
     return dedupe(found)
 
