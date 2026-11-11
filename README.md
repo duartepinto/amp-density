@@ -352,8 +352,8 @@ stations and walking areas in `data/amp_transit.js`:
 
 | Rank | What |
 |---|---|
-| High | hospitals of 3 ha or more (São João, Santo António, IPO, Gaia…), the airport (`aeroway=aerodrome` with an IATA code; it counts by its terminal buildings, not its 317 ha of runways and fences, which reach Verdes), stations where long-distance trains stop (stops of OSM's `CP Longo Curso` routes: Campanhã, Gaia, Espinho, Trofa, Santo Tirso) |
-| Medium | higher education (`amenity=university`: each faculty), other hospitals (outlines of 0.1 ha or more), shopping centres of 1 ha or more, stadiums, exhibition, conference and concert venues with a Wikidata entry |
+| High | hospitals of 3 ha or more (São João, Santo António, IPO, Gaia…), the airport (`aeroway=aerodrome` with an IATA code; it counts by its terminal buildings, not its 317 ha of runways and fences, which reach Verdes), the main train stations: where long-distance trains stop (stops of OSM's `CP Longo Curso` routes: Campanhã, Gaia, Espinho, Trofa, Santo Tirso) and `MAIN_STATIONS` (São Bento, General Torres, Ermesinde) |
+| Medium | higher education (`amenity=university`: each faculty), other hospitals (outlines of 0.1 ha or more), the other train stations (any other stop of an OSM `route=train`: the suburban halts), shopping centres of 1 ha or more, stadiums, exhibition, conference and concert venues with a Wikidata entry |
 | Low | museums, galleries, theatres, arts centres, zoos, theme parks and markets with a Wikidata entry; sights (`tourism=attraction`) with a Wikipedia article, which leaves out the many listed fountains, trees and pillories; parks of 5 ha or more |
 
   Each place counts once: a university outline that holds several faculties is dropped (the
@@ -418,7 +418,7 @@ about 4.4 GB for the AMP (`--dry-run` lists the tiles without downloading).
 | `pipeline/build_transit.py` | `WALK_MINUTES`, `WALK_KMH`, `REACH_M`, `SNAP_M`, `INTERCHANGE_M`, `PERIODS`, `DRIVE_KMH`, `MAXSPEED_SHARE`, `SIGNAL_S`, `JUNCTION_S`, `DRIVE_REACH_M`… |
 | `pipeline/projects.py` | planned lines (Metro do Porto 3.0, PMUS): stations, colours, official lengths, status, sources |
 | `pipeline/ridership.py` | Metro do Porto's validations by part of the network (2024, 2025) and which stations count in each |
-| `pipeline/build_lines.py` | the points-of-interest rules (`classify`, `LARGE_HOSPITAL_HA`, `MALL_HA`, `PARK_HA`, `LONG_DISTANCE`), `PARALLEL_M` |
+| `pipeline/build_lines.py` | the points-of-interest rules (`classify`, `LARGE_HOSPITAL_HA`, `MALL_HA`, `PARK_HA`, `LONG_DISTANCE`, `MAIN_STATIONS`), `PARALLEL_M` |
 | `index.html` | density classes (`BREAKS`, `RAMP`), line widths, basemaps; the Google Tag Manager container (`GTM-MW8LDDHQ`) |
 
 ## Files

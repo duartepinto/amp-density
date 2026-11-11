@@ -529,12 +529,12 @@
         perStationIn: (c) => `Average per station in ${c}`,
         perStationOut: "Average per station outside",
         poiKinds: {
-          hospital: "Hospital", airport: "Airport", rail: "Long-distance trains", education: "Higher education",
+          hospital: "Hospital", airport: "Airport", rail: "Train station", education: "Higher education",
           mall: "Shopping centre", stadium: "Stadium", venue: "Venue", museum: "Museum", theatre: "Theatre",
           park: "Park", market: "Market", sight: "Sight",
         },
         poiNote: (big, mall, park) => `From OpenStreetMap, ranked by the trips they draw. High: hospitals of ${big} ha
-          or more, the airport and stations with long-distance trains. Medium: higher education, other hospitals,
+          or more, the airport and the main train stations. Medium: higher education, other hospitals, other train stations,
           shopping centres of ${mall} ha or more, major stadiums and venues. Low: museums, theatres, sights with a
           Wikipedia article, parks of ${park} ha or more and zoos. A place counts when it reaches into a station's
           walking area, and is listed under the station nearest its centre.`,
@@ -712,13 +712,13 @@
         perStationIn: (c) => `Média por estação no ${c}`,
         perStationOut: "Média por estação fora",
         poiKinds: {
-          hospital: "Hospital", airport: "Aeroporto", rail: "Comboios de longo curso", education: "Ensino superior",
+          hospital: "Hospital", airport: "Aeroporto", rail: "Estação de comboios", education: "Ensino superior",
           mall: "Centro comercial", stadium: "Estádio", venue: "Espaço de eventos", museum: "Museu", theatre: "Teatro",
           park: "Parque", market: "Mercado", sight: "Monumento",
         },
         poiNote: (big, mall, park) => `Do OpenStreetMap, ordenados pelas deslocações que atraem. Alta: hospitais com
-          ${big} ha ou mais, o aeroporto e as estações com comboios de longo curso. Média: ensino superior, outros
-          hospitais, centros comerciais com ${mall} ha ou mais, grandes estádios e espaços de eventos. Baixa: museus,
+          ${big} ha ou mais, o aeroporto e as principais estações de comboios. Média: ensino superior, outros
+          hospitais, outras estações de comboios, centros comerciais com ${mall} ha ou mais, grandes estádios e espaços de eventos. Baixa: museus,
           teatros, monumentos com artigo na Wikipédia, parques com ${park} ha ou mais e jardins zoológicos. Um local conta
           quando entra na área a pé de uma estação, e aparece junto da estação mais próxima do seu centro.`,
         lineNote: (m, c) => `Residentes a ${m} minutos a pé de qualquer estação da linha, cada um contado uma só vez; por km,

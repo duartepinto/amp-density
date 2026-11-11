@@ -44,9 +44,10 @@ AREA_SIMPLIFY_M = 10  # the line's walking area, drawn on the map
 
 # Points of interest, by the trips they draw:
 #   high    regional draws that many thousands use every day: large hospitals, the airport,
-#           stations with long-distance trains
+#           the main train stations (where long-distance trains stop, plus MAIN_STATIONS)
 #   medium  a few thousand a day: faculties and other higher education, other hospitals,
-#           shopping centres, stadiums, exhibition and concert venues
+#           shopping centres, stadiums, exhibition and concert venues, the other train
+#           stations (any other stop of a passenger train route: the suburban halts)
 #   low     leisure and culture: museums, theatres, notable sights, large parks, zoos
 # Small things tagged like these are left out (a hospital under MIN_HOSPITAL_HA, a mall
 # under MALL_HA, a park under PARK_HA); for the rest, culture and sights only count when
@@ -58,6 +59,9 @@ MIN_HOSPITAL_HA = 0.1
 MALL_HA = 1
 PARK_HA = 5
 LONG_DISTANCE = {"CP Longo Curso"}  # OSM train networks whose stops are high-ranked
+# Main stations without long-distance trains, also high: Porto's city-centre terminus and the
+# busiest urban-train junctions. Names as bare_name() gives them.
+MAIN_STATIONS = {"São Bento", "General Torres", "Ermesinde"}
 POI_TAGS = [
     ("amenity", "hospital"), ("aeroway", "aerodrome"), ("amenity", "university"), ("shop", "mall"),
     ("leisure", "stadium"), ("amenity", "exhibition_centre"), ("amenity", "conference_centre"),
@@ -136,25 +140,35 @@ def read_pois(shape: shapely.Geometry) -> list[dict]:
             inside = [t for t in terminals if p["geom"].contains(t.centroid)]
             if inside:
                 p["geom"] = shapely.union_all(inside)
-    found += long_distance_stations(shape)
+    found += train_stations(shape)
     return dedupe(found)
 
 
-def long_distance_stations(shape: shapely.Geometry) -> list[dict]:
-    """Stations where long-distance trains stop (high), from those networks' OSM routes."""
-    stops = set()
+def train_stations(shape: shapely.Geometry) -> list[dict]:
+    """Stations where passenger trains stop, from the stops of OSM's train routes, whatever
+    their network (CP Porto, CP Regional, CP Longo Curso...): high where long-distance trains
+    stop or among MAIN_STATIONS, medium otherwise."""
+    stops, long_distance = set(), set()
     for r in osmium.FileProcessor(str(PBF), osmium.osm.RELATION).with_filter(osmium.filter.TagFilter(("route", "train"))):
+        refs = {m.ref for m in r.members if m.type == "n" and m.role.startswith("stop")}
+        stops |= refs
         if r.tags.get("network") in LONG_DISTANCE:
-            stops |= {m.ref for m in r.members if m.type == "n" and m.role.startswith("stop")}
-    by_name = defaultdict(list)
+            long_distance |= refs
+    by_name, main = defaultdict(list), set(MAIN_STATIONS)
     for n in osmium.FileProcessor(str(PBF), osmium.osm.NODE).with_filter(osmium.filter.IdFilter(stops)):
         if n.tags.get("name"):
-            by_name[bare_name(n.tags["name"])].append((n.location.lon, n.location.lat))
+            name = bare_name(n.tags["name"])
+            by_name[name].append((n.location.lon, n.location.lat))
+            if n.id in long_distance:
+                main.add(name)
     out = []
     for name, lonlat in sorted(by_name.items()):
         geom = shapely.MultiPoint(metric(lonlat))
         if shape.contains(geom.centroid):
-            out.append({"name": name, "tier": HIGH, "kind": "rail", "geom": geom})
+            out.append({"name": name, "tier": HIGH if name in main else MEDIUM, "kind": "rail", "geom": geom})
+    missing = set(MAIN_STATIONS) - set(by_name)
+    if missing:
+        raise SystemExit(f"MAIN_STATIONS not found among OSM train stops: {sorted(missing)}")
     return out
 
 
