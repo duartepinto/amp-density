@@ -13,6 +13,8 @@ municipality (Porto) and outside it, and the points of interest within a walk of
 - Per km: residents served ÷ the line's length, along one direction of travel (for a line
   under construction, whose track OSM maps for both directions, the parallel track is dropped;
   for a projected line, its official length where the plan gives one).
+- Use: Metro do Porto's validations (boardings) by part of the network (ridership.py),
+  per day of the year and per resident within a walk of that part's stations.
 - Points of interest from OpenStreetMap, ranked by the trips they draw (POI rules below).
   One counts for a line when it reaches into the walking area of one of its stations.
 
@@ -34,6 +36,7 @@ import shapely
 
 from build_transit import (METRIC_CRS, PBF, ROOT, bare_name, lonlat_rings, metric, read_grid, region_shape,
                            residents)
+import ridership
 from regions import REGIONS
 
 PARALLEL_M = 15  # track this close to a longer piece is its other direction
@@ -284,6 +287,27 @@ def main(region: str) -> None:
         f = figures([transit["stations"][i] for i in idx], [areas[i] for i in idx], track_km(feats), core, grid, pois)
         out["networks"][key] = f
         print(f"all open   {f['stations']:>3} stations {f['km']:>5} km {f['pop']:>7} residents ({f['pop_core']} in core)")
+
+    # Use: boardings by part of the network (the trunk, line D, each line's own branch).
+    if "metro" in keys:
+        parts = defaultdict(list)
+        for i in on_metro:
+            parts[ridership.part_of(set(stations[i]["lines"]), stations[i]["name"])].append(i)
+        use = {"year": ridership.YEAR, "previous": ridership.PREVIOUS, "source": ridership.SOURCE, "parts": {}}
+        for key, (line, counts) in ridership.PARTS.items():
+            idx = parts[key]
+            res = residents(shapely.union_all([areas[i] for i in idx]), *grid) if idx else 0
+            use["parts"][key] = {"line": line, "stations": len(idx),
+                                 "validations": counts[ridership.YEAR] * 1000, "previous": counts[ridership.PREVIOUS] * 1000,
+                                 "residents": round(res)}
+            print(f"use {key:<6} {len(idx):>3} stations {counts[ridership.YEAR] * 1000 / 365:8.0f}/day "
+                  f"{res:7.0f} residents  {counts[ridership.YEAR] * 1000 / 365 / res:5.2f} per resident")
+        missing = set(parts) - set(ridership.PARTS)
+        if missing:
+            raise SystemExit(f"stations in no reported part: {missing}")
+        use["network"] = {"stations": len(on_metro), "validations": ridership.TOTAL[ridership.YEAR],
+                          "previous": ridership.TOTAL[ridership.PREVIOUS], "residents": out["networks"]["metro"]["pop"]}
+        out["use"] = use
 
     path = ROOT / "data" / f"{region}_lines.js"
     path.write_text("window.LINES_DATA = " + json.dumps(out, ensure_ascii=False, separators=(",", ":")) + ";\n")

@@ -22,7 +22,8 @@ station serves.
 - **Metro lines** (the Map | Metro lines switch in the title card) compares the metro lines: the
   residents within a 10-minute walk of each line's stations, per km and per station, inside and
   outside the municipality of Porto, and the points of interest near them, ranked high, medium or
-  low; with the whole network as a total row. Choose a line for its details and to see it on the
+  low; how much each part of the line is used (Metro do Porto's 2025 boardings per resident
+  nearby); with the whole network as a total row. Choose a line for its details and to see it on the
   map with its walking area.
 
 **Open `index.html`.** It is a static page that works straight from disk or any static host. It loads
@@ -321,6 +322,30 @@ stations and walking areas in `data/amp_transit.js`:
 - **Inside/outside Porto:** residents in the part of the walking areas inside the municipality of
   Porto (`core` in `regions.py`, the census subsections with `DTMN21` 1312), counting the share of
   each cell inside; the per-station averages split stations by where they stand.
+- **Use** ([Metro do Porto, Relatório e Contas 2025](https://www.metrodoporto.pt/metrodoporto/uploads/document/file/797/rc_metro_do_porto_2025_digital_lowquality.pdf),
+  p. 21, in `pipeline/ridership.py`): validations (boardings) in 2025 and 2024 by part of the network.
+  Validations are counted where people board, so the report gives the trunk (Senhora da Hora –
+  Estádio do Dragão: 47.1 million) and line D (30.9 million, Trindade counted in the trunk) whole,
+  and lines A, B, C, E and F only by their own branch beyond the trunk; these parts add up to the
+  94.54 million total. Each station is assigned to its part by the lines calling there (Fonte do
+  Cuco, named as an end of both the B and C branches, is counted with B's). **Per resident** =
+  validations ÷ 365 ÷ residents within a 10-minute walk of that part's stations:
+
+  | Part | Boardings a day | Residents nearby | Per resident |
+  |---|---|---|---|
+  | Trunk | 129,082 | 76,078 | 1.70 |
+  | D | 84,597 | 87,024 | 0.97 |
+  | C branch (after Fonte do Cuco – ISMAI) | 8,436 | 22,420 | 0.38 |
+  | A branch (Vasco da Gama – Senhor de Matosinhos) | 12,575 | 46,513 | 0.27 |
+  | B branch (Fonte do Cuco – Póvoa, shared with E to Verdes) | 13,463 | 52,286 | 0.26 |
+  | F branch (Contumil – Fânzeres) | 7,301 | 31,637 | 0.23 |
+  | E branch (Botica, Aeroporto) | 3,556 | 1,916 | 1.86 |
+  | Network | 259,014 | 286,860 | 0.90 |
+
+  It is not a share of residents who ride: every boarding counts, transfers and return trips
+  included, and so do visitors, so hubs, the centre and the airport score high. On residential
+  branches it comes closer to how much the people living there use the metro. The report gives no
+  per-line unique riders (only distinct Andante cards per month for the whole network).
 - **Points of interest** from OpenStreetMap, ranked by the trips they draw. A place counts for a
   line when its outline reaches into one of its stations' walking areas, and is listed under the
   station nearest its centre.
@@ -392,6 +417,7 @@ about 4.4 GB for the AMP (`--dry-run` lists the tiles without downloading).
 | `pipeline/extract_osm.py` | `NONRES_AREAS`, the non-residential areas |
 | `pipeline/build_transit.py` | `WALK_MINUTES`, `WALK_KMH`, `REACH_M`, `SNAP_M`, `INTERCHANGE_M`, `PERIODS`, `DRIVE_KMH`, `MAXSPEED_SHARE`, `SIGNAL_S`, `JUNCTION_S`, `DRIVE_REACH_M`… |
 | `pipeline/projects.py` | planned lines (Metro do Porto 3.0, PMUS): stations, colours, official lengths, status, sources |
+| `pipeline/ridership.py` | Metro do Porto's validations by part of the network (2024, 2025) and which stations count in each |
 | `pipeline/build_lines.py` | the points-of-interest rules (`classify`, `LARGE_HOSPITAL_HA`, `MALL_HA`, `PARK_HA`, `LONG_DISTANCE`), `PARALLEL_M` |
 | `index.html` | density classes (`BREAKS`, `RAMP`), line widths, basemaps; the Google Tag Manager container (`GTM-MW8LDDHQ`) |
 
@@ -412,6 +438,7 @@ pipeline/build_grid.py      the population grid
 pipeline/build_transit.py   the rail layer
 pipeline/projects.py        planned lines not in OSM (Metro do Porto 3.0, PMUS)
 pipeline/build_lines.py     figures per metro line, points of interest
+pipeline/ridership.py       Metro do Porto's validations by part of the network
 pipeline/fetch_lidar.py     DGT LiDAR tiles (not used yet)
 ```
 

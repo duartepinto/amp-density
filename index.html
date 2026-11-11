@@ -472,6 +472,27 @@
         colPerKm: "Per km",
         colPerStation: "Per station",
         colNew: "New",
+        useHeading: (y) => `Use (${y})`,
+        colBoardings: "Boardings a day",
+        colResidentsNear: "Residents nearby",
+        colPerResident: "Per resident",
+        perResidentLong: "Boardings a day per resident nearby",
+        colVs: (y) => `vs ${y}`,
+        trunk: "Trunk",
+        useNote: (y, src) => `Boardings: Metro do Porto's validations in ${y} by part of the network
+          (<a href="${src}" target="_blank" rel="noopener">annual report</a>), averaged over the year's days. They are
+          counted where people board, so lines sharing the trunk (Senhora da Hora – Estádio do Dragão) can't be told apart
+          there: a line's row is its own branch beyond the trunk; line D's is all of it but Trindade, which counts in the
+          trunk. Per resident: boardings a day per resident within a 10-minute walk of those stations. Every boarding
+          counts, transfers and visitors' too, so hubs, the city centre and the airport score high; on residential
+          branches it reads closer to how much the people living there use the metro.`,
+        useHero: "boardings a day on its own branch, beyond the shared trunk",
+        useHeroD: "boardings a day at its stations (Trindade aside)",
+        useNoteBranch: (day, per, b) => `Boardings at the stations of this line's own branch, beyond the trunk shared with
+          other lines${b ? " (shared with line E as far as Verdes; Fonte do Cuco, where B and C part, counts here)" : ""}. The trunk, Senhora da Hora – Estádio do
+          Dragão, had ${day} boardings a day, ${per} per resident nearby.`,
+        useNoteD: "Trindade, where line D meets the trunk, counts with the trunk.",
+        useSource: (y, src) => `Validations ${y}: <a href="${src}" target="_blank" rel="noopener">Metro do Porto, annual report</a>.`,
         groupHead: { metro_plan: "Projected by Metro do Porto (Metro 3.0)", pmus: "Proposed in Porto's PMUS" },
         newReach: (n) => `<b>${n}</b> of them beyond a walk of any open metro station: residents it brings within reach.`,
         newReachProject: (n) => `<b>${n}</b> of them beyond a walk of any open or building metro station: residents it would bring within reach.`,
@@ -634,6 +655,27 @@
         colPerKm: "Por km",
         colPerStation: "Por estação",
         colNew: "Novos",
+        useHeading: (y) => `Utilização (${y})`,
+        colBoardings: "Validações por dia",
+        colResidentsNear: "Residentes perto",
+        colPerResident: "Por residente",
+        perResidentLong: "Validações por dia por residente perto",
+        colVs: (y) => `vs ${y}`,
+        trunk: "Tronco comum",
+        useNote: (y, src) => `Validações da Metro do Porto em ${y} por troço da rede
+          (<a href="${src}" target="_blank" rel="noopener">relatório e contas</a>), em média por dia do ano. Contam-se onde
+          se entra, por isso as linhas que partilham o tronco comum (Senhora da Hora – Estádio do Dragão) não se distinguem
+          aí: para cada linha mostra-se a sua antena, para lá do tronco; para a linha D, toda a linha exceto a Trindade,
+          que conta no tronco. Por residente: validações por dia por residente a 10 minutos a pé dessas estações. Contam todas
+          as validações, incluindo transbordos e visitantes, por isso as interfaces, o centro e o aeroporto ficam altos;
+          nas antenas residenciais aproxima-se mais do uso que os moradores fazem do metro.`,
+        useHero: "validações por dia na sua antena, para lá do tronco comum",
+        useHeroD: "validações por dia nas suas estações (exceto a Trindade)",
+        useNoteBranch: (day, per, b) => `Validações nas estações da antena desta linha, para lá do tronco comum partilhado
+          com outras linhas${b ? " (partilhada com a linha E até aos Verdes; a Fonte do Cuco, onde a B e a C se separam, conta aqui)" : ""}. O tronco comum, Senhora
+          da Hora – Estádio do Dragão, teve ${day} validações por dia, ${per} por residente perto.`,
+        useNoteD: "A Trindade, onde a linha D encontra o tronco comum, conta no tronco.",
+        useSource: (y, src) => `Validações ${y}: <a href="${src}" target="_blank" rel="noopener">Metro do Porto, relatório e contas</a>.`,
         groupHead: { metro_plan: "Previstas pela Metro do Porto (Metro 3.0)", pmus: "Propostas no PMUS do Porto" },
         newReach: (n) => `<b>${n}</b> deles fora do alcance a pé de qualquer estação de metro aberta: residentes que passa a servir.`,
         newReachProject: (n) => `<b>${n}</b> deles fora do alcance a pé de qualquer estação de metro aberta ou em obra: residentes que passaria a servir.`,
@@ -699,10 +741,11 @@
       const v = I18N[lang][key] ?? I18N.en[key];
       return typeof v === "function" ? v(...args) : v;
     };
-    let fmtInt, fmt1;
+    let fmtInt, fmt1, fmt2;
     function setFormats() {
       fmtInt = new Intl.NumberFormat(t("locale"), { maximumFractionDigits: 0 });
       fmt1 = new Intl.NumberFormat(t("locale"), { maximumFractionDigits: 1 });
+      fmt2 = new Intl.NumberFormat(t("locale"), { minimumFractionDigits: 2, maximumFractionDigits: 2 });
     }
     setFormats();
     // Error figures come from the data as "14%" or "4 pts".
@@ -1215,12 +1258,14 @@
       const bar = (v, r) => `<div class="dbar"><i style="width:${(100 * v) / max}%;background:${lineOf(r).colour}"></i></div>`;
       // cols: [heading, shown(figures, ref), value(figures) to sort by]. Rows sort within open
       // lines and within lines under construction; the network row stays between them.
-      const table = (id, cols) => {
+      // Options: get (a row's figures), rows (the open lines'), extra ([label, figures] rows
+      // before the total, not sorted), total (figures), groups (planned lines).
+      const table = (id, cols, { get = (r) => lines.lines[r], rows = open, extra = [], totalRow = total, rowGroups = groups } = {}) => {
         const sort = lineSorts[id];
         const td = (v) => `<td>${v}</td>`;
-        const row = (r) => `<tr data-line="${r}" tabindex="0"><th>${badge(r)}</th>${cols.map((c) => td(c[1](lines.lines[r], r))).join("")}</tr>`;
+        const row = (r) => `<tr data-line="${r}" tabindex="0"><th>${badge(r)}</th>${cols.map((c) => td(c[1](get(r), r))).join("")}</tr>`;
         const order = (rs) => !sort ? rs : [...rs].sort((a, b) => {
-          const [va, vb] = [a, b].map((r) => cols[sort.col][2](lines.lines[r]));
+          const [va, vb] = [a, b].map((r) => cols[sort.col][2](get(r)));
           if (va == null || vb == null) return (va == null) - (vb == null) || a.localeCompare(b); // no value: last
           return sort.dir * (va - vb) || a.localeCompare(b);
         });
@@ -1233,9 +1278,10 @@
         return `<table class="lt">
           <thead><tr><th></th>${head}</tr></thead>
           <tbody>
-            ${order(open).map(row).join("")}
-            <tr class="total"><th>${t("network")}</th>${cols.map((c) => td(c[1](total, null))).join("")}</tr>
-            ${groups.map(([head, rs]) => `<tr class="sep"><th colspan="${cols.length + 1}">${head}</th></tr>${order(rs).map(row).join("")}`).join("")}
+            ${order(rows).map(row).join("")}
+            ${extra.map(([label, f]) => `<tr><th>${label}</th>${cols.map((c) => td(c[1](f, null))).join("")}</tr>`).join("")}
+            <tr class="total"><th>${t("network")}</th>${cols.map((c) => td(c[1](totalRow, null))).join("")}</tr>
+            ${rowGroups.map(([head, rs]) => `<tr class="sep"><th colspan="${cols.length + 1}">${head}</th></tr>${order(rs).map(row).join("")}`).join("")}
           </tbody>
         </table>`;
       };
@@ -1252,6 +1298,7 @@
           [t("colPerStation"), (f) => num(f.avg), (f) => f.avg],
           [t("colNew"), (f) => num(f.pop_new), (f) => f.pop_new],
         ])}
+        ${useTable(table)}
         <h2>${t("coreHeading", core)}</h2>
         ${table("core", [
           [t("colStationsIn", core), (f) => t("ofTotal", f.stations_core, f.stations), (f) => f.stations_core],
@@ -1264,6 +1311,44 @@
         ${table("poi", t("tiers").map((label, k) => [label, (f) => num(tierCounts(f)[k]), (f) => tierCounts(f)[k]]))}
         <p class="note">${t("linesTableNote", core)}</p>
         <p class="note">${t("poiNote", lines.rules.large_hospital_ha, lines.rules.mall_ha, lines.rules.park_ha)}</p>`;
+    }
+
+    // Use: Metro do Porto's boardings by part of the network, per day and per resident nearby.
+    const useFigures = (p) => p && { stations: p.stations, residents: p.residents, day: p.validations / 365,
+      perResident: p.validations / 365 / p.residents, growth: p.validations / p.previous - 1 };
+    const signedPct = (g) => `${g > 0 ? "+" : g < 0 ? "−" : ""}${fmt1.format(Math.abs(100 * g))}%`;
+    function useTable(table) {
+      const use = lines.use;
+      if (!use) return "";
+      const rows = Object.keys(use.parts).filter((r) => lineOf(r)).sort();
+      return `
+        <h2>${t("useHeading", use.year)}</h2>
+        ${table("use", [
+          [t("colStations"), (f) => num(f.stations), (f) => f.stations],
+          [t("colBoardings"), (f) => num(f.day), (f) => f.day],
+          [t("colResidentsNear"), (f) => num(f.residents), (f) => f.residents],
+          [t("colPerResident"), (f) => fmt2.format(f.perResident), (f) => f.perResident],
+          [t("colVs", use.previous), (f) => signedPct(f.growth), (f) => f.growth],
+        ], { get: (r) => useFigures(use.parts[r]), rows, extra: [[t("trunk"), useFigures(use.parts.trunk)]],
+             totalRow: useFigures(use.network), rowGroups: [] })}
+        <p class="note">${t("useNote", use.year, use.source)}</p>`;
+    }
+
+    function useBlock(ref) {
+      const use = lines.use, f = useFigures(use?.parts[ref]);
+      if (!f) return "";
+      const trunk = useFigures(use.parts.trunk);
+      return `
+        <h2>${t("useHeading", use.year)}</h2>
+        <div class="hero">${num(f.day)} <small>${t(ref === "D" ? "useHeroD" : "useHero")}</small></div>
+        <dl class="rows">
+          <dt>${t("colStations")}</dt><dd>${f.stations}</dd>
+          <dt>${t("colResidentsNear")}</dt><dd>${num(f.residents)}</dd>
+          <dt>${t("perResidentLong")}</dt><dd>${fmt2.format(f.perResident)}</dd>
+          <dt>${t("colVs", use.previous)}</dt><dd>${signedPct(f.growth)}</dd>
+        </dl>
+        <p class="note">${ref === "D" ? t("useNoteD") : t("useNoteBranch", num(trunk.day), fmt2.format(trunk.perResident), ref === "B")}
+          ${t("useSource", use.year, use.source)}</p>`;
     }
 
     function lineDetail(ref) {
@@ -1290,6 +1375,7 @@
           <dt>${t("perKm")}</dt><dd>${num(f.pop / f.km)}</dd>
           <dt>${t("perStation")}</dt><dd>${num(f.avg)}</dd>
         </dl>
+        ${useBlock(ref)}
         <h2>${t("coreHeading", core)}</h2>
         ${splitBar([t("inCore", core), f.pop_core, "--apts"], [t("outsideCore"), f.pop - f.pop_core, "--houses"])}
         <dl class="rows">
