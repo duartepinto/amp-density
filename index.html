@@ -914,7 +914,11 @@
 
     // Track pieces of the networks switched on; stations served by any of them.
     const trackFilter = (...more) => ["all", ["in", ["get", "net"], ["literal", [...shown]]], ...more];
-    const stationFilter = () => ["any", ...[...shown].map((k) => ["boolean", ["get", `on_${k}`], false])];
+    const anyOn = (prefix) => ["any", ...[...shown].map((k) => ["boolean", ["get", `${prefix}${k}`], false])];
+    // A future platform (and its connector) shows only while a network of its planned lines is on.
+    const stationFilter = () => ["case", ["boolean", ["get", "future"], false], anyOn("pn_"), anyOn("on_")];
+    // A connector needs both of its ends: the first platform too.
+    const linkFilter = () => ["all", stationFilter(), anyOn("p0_")];
     function applyNetworkFilters() {
       if (!map.getSource("transit")) return;
       map.setFilter("transit-casing", trackFilter());
@@ -923,7 +927,7 @@
       map.setFilter("transit-ties", trackFilter(RAIL));
       map.setFilter("transit-planned", trackFilter(PLANNED, ["!", PROJ]));
       map.setFilter("transit-projected", trackFilter(PROJ));
-      for (const id of STATION_LAYERS) map.setFilter(id, stationFilter());
+      for (const id of STATION_LAYERS) map.setFilter(id, id === "stations" ? stationFilter() : linkFilter());
       map.setFilter("station-labels", ["all", stationFilter(), ["boolean", ["get", "label"], false]]);
     }
     const byZoom = (z9, z13, z16) => ["interpolate", ["linear"], ["zoom"], 9, z9, 13, z13, 16, z16];
@@ -972,6 +976,32 @@
       // line's station) gets a marker at each, joined by a capsule-shaped connector, the
       // usual transit-map sign that they are one station. All its pieces share its id.
       const nets = (s) => Object.fromEntries(s.nets.map((k) => [`on_${k}`, true]));
+      const plannedNets = (s) => Object.fromEntries(s.planned.map((r) => [`pn_${lineOf(r).net}`, true]));
+      // The network each platform of an interchange belongs to: of the networks serving the
+      // station (open or planned, to match the platform), the one whose track runs nearest.
+      const track = { open: {}, planned: {} };
+      for (const f of transit.tracks.features) {
+        const c = f.geometry.coordinates;
+        ((track[f.properties.planned ? "planned" : "open"][f.properties.net]) ??= []).push(...(f.geometry.type === "LineString" ? c : c.flat()));
+      }
+      const dist2 = (kind, n, part) => Math.min(...(track[kind][n] ?? [[1e3, 1e3]]).map((q) => ((q[0] - part[0]) * 0.75) ** 2 + (q[1] - part[1]) ** 2));
+      const nearest = (cand, kind, part) => (cand.length < 2 ? cand : [cand.reduce((a, b) => (dist2(kind, b, part) < dist2(kind, a, part) ? b : a))]);
+      const partNets = (s, part, prefix) => {
+        const kind = part[2] ? "planned" : "open";
+        const netsOf = (refs) => [...new Set(refs.map((r) => lineOf(r).net))];
+        const best = nearest(netsOf(part[2] ? s.planned : s.lines), kind, part);
+        if (!part[2]) {
+          // A planned network with no platform of its own calls at an existing one (the
+          // open platform its planned track runs nearest to), so it keeps that one on.
+          const own = new Set(s.parts.filter((q) => q[2]).flatMap((q) => nearest(netsOf(s.planned), "planned", q)));
+          const open = s.parts.filter((q) => !q[2]);
+          for (const n of netsOf(s.planned).filter((n) => !own.has(n) && !netsOf(s.lines).includes(n))) {
+            const near = open.reduce((a, b) => (dist2("planned", n, b) < dist2("planned", n, a) ? b : a));
+            if (near === part || (near[0] === part[0] && near[1] === part[1])) best.push(n);
+          }
+        }
+        return Object.fromEntries(best.map((n) => [`${prefix}${n}`, true]));
+      };
       const refsOf = (s) => ` ${[...s.lines, ...s.planned].join(" ")} `; // " A B " for a substring test
       map.addSource("stations", {
         type: "geojson",
@@ -981,7 +1011,7 @@
             (s.parts ?? [[s.lon, s.lat, s.lines.length ? 0 : 1]]).map(([lon, lat, future], j) => ({
               type: "Feature", id: i,
               properties: { name: s.name, hub: s.lines.length + s.planned.length > 1, future: Boolean(future), label: j === 0,
-                refs: refsOf(s), ...nets(s) },
+                refs: refsOf(s), ...(s.parts ? partNets(s, [lon, lat, future], future ? "pn_" : "on_") : { ...nets(s), ...plannedNets(s) }) },
               geometry: { type: "Point", coordinates: [lon, lat] },
             }))),
         },
@@ -990,10 +1020,10 @@
         type: "geojson",
         data: {
           type: "FeatureCollection",
-          features: transit.stations.flatMap((s, i) => s.parts ? [{
-            type: "Feature", id: i, properties: { refs: refsOf(s), ...nets(s) },
-            geometry: { type: "MultiLineString", coordinates: s.parts.slice(1).map((p) => [s.parts[0].slice(0, 2), p.slice(0, 2)]) },
-          }] : []),
+          features: transit.stations.flatMap((s, i) => (s.parts ?? []).slice(1).map((p) => ({
+            type: "Feature", id: i, properties: { refs: refsOf(s), future: Boolean(p[2]), ...partNets(s, p, p[2] ? "pn_" : "on_"), ...partNets(s, s.parts[0], "p0_") },
+            geometry: { type: "LineString", coordinates: [s.parts[0].slice(0, 2), p.slice(0, 2)] },
+          }))),
         },
       });
       const on = ["boolean", ["feature-state", "selected"], false];
@@ -1704,7 +1734,7 @@
     loadScript(`data/${REGION}_transit.js`, "TRANSIT_DATA")
       .then((json) => {
         transit = json;
-        for (const n of transit.networks) shown.add(n.key);
+        for (const n of transit.networks) if (!n.projects) shown.add(n.key); // projected lines start off
         renderToggles();
         addTransitLayers();
         // Figures per metro line, for the lines view (optional, like the rail layer).
