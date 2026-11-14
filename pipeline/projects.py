@@ -24,9 +24,14 @@ Stations are placed as follows:
   PK along the track, the stations after Lagoa about 45 m further (the corridor widens at
   stations). The plan draws alternative 1 (a tunnel between Parque Oriental and Lagoa); the
   study also has alternative 2, on the surface there and 117 m longer.
-- ISMAI-Muro (Trofa): the EIA in consultation (Aug-Oct 2026) has light rail from ISMAI to
-  Muro (3.1 km, stations Ribela and Muro) and a metroBus from Muro to Trofa, left out here.
-  Ribela at its bus stop (20 m from the track), Muro at the end of the track.
+- ISMAI-Muro (Trofa): the EIA of Linha LT ISMAI - Paradela (participa.pt, Aug-Oct 2026;
+  SIAIA AIA 3950) has light rail from ISMAI to Muro (3.1 km, stations Ribela and Muro) and a
+  BRT from Muro to the Trofa interchange, left out here. OSM's track matches the Estudo
+  Prévio's general plan (P-PR-LT-1100-PG-DS-AYG-G02100-00, PT-TM06, 1:15,000: median 2 m)
+  and its chainages (it crosses Rua de Ferronho, PK 10+460, 454 m from its start), so the
+  stations are set on it at the middle of their platforms by the Relatório Síntese's PKs:
+  Ribela 10+466 - 10+536, just past the level crossing with Rua de Ferronho, and Muro
+  12+906 - 12+976, the old CP station.
 - São Mamede (IPO - Estádio do Mar, 6.55 km): stations on the 2023 map; IPO II, Elaine
   Sanceau, Xanana Gusmão and Senhora da Hora II at their places (within 15 m of the track),
   ISCAP by the institute, Pedra Verde by Rua 5 de Outubro (where the 2009 EIA put it);
@@ -72,8 +77,8 @@ PROJECTS = {
         {"ref": "TR", "name": "Linha ISMAI – Muro – Trofa", "colour": "#8BC63E", "track": "Linha da Trofa", "km": 3.1,
          "status": "eia_trofa", "stations": [
              ("ISMAI", None),
-             ("Ribela", (-8.60533, 41.28278)),
-             ("Muro", (-8.60051, 41.29655)),
+             ("Ribela", (-8.61095, 41.27636)),
+             ("Muro", (-8.60058, 41.29615)),
          ]},
         {"ref": "SM", "name": "Linha de São Mamede", "colour": "#A0522D", "track": "Linha de São Mamede", "km": 6.55,
          "status": "studies", "stations": [

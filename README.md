@@ -233,8 +233,9 @@ Senhora da Hora II, Os Verdes II, Parque Maia II, Matosinhos Sul II) are listed 
   Gondomar track follows the same alignment (median 5 m away).
   The other lines' track: OSM's `railway=proposed` ways (Maia II's way also carries the metroBus spur to
   the airport, cut off at Os Verdes II: the metro option ends there, 13.0 km as officially).
-  Stations are placed on that track: **ISMAI – Muro** from its EIA (consultation Aug–Oct 2026; light
-  rail to Muro, then a metroBus to Trofa, not drawn); **São Mamede** and **Maia II** (preliminary studies;
+  Stations are placed on that track: **ISMAI – Muro** at the middle of their platforms by the
+  chainages in its EIA (consultation Aug–Oct 2026; light rail to Muro, then a BRT to Trofa, not
+  drawn), whose Estudo Prévio plan matches OSM's track within a few metres; **São Mamede** and **Maia II** (preliminary studies;
   Maia II's metro or metroBus not decided, the metro option is drawn) at their named places where
   these are precise, the rest spaced between them in the proportions of Metro do Porto's maps.
 - **PMUS** ([Porto, consultation Sep–Nov 2026](https://mobilidade.cm-porto.pt/destaque/pmus-discussao-publica),
