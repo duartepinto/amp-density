@@ -3,21 +3,27 @@ Each set is drawn as its own network (`projects` in regions.py), with its own to
 
 A line lists its stations in order: (name, (lon, lat)), or (name, None) for an open or
 building station it starts from or passes (its position then comes from OSM). Its track
-is the OSM `railway=proposed` way(s) named `track`, cut at its first and last stations
-(Maia II's way also carries the metroBus spur to the airport, which is left out), or,
-without one, a smooth curve through the stations. `km` is the official length.
+is the GeoJSON line in pipeline/ named `path`, or the OSM `railway=proposed` way(s) named
+`track`, cut at its first and last stations (Maia II's way also carries the metroBus spur
+to the airport, which is left out), or, without either, a smooth curve through the
+stations. `km` is the official length.
 `status` says how far along it is (the page explains each).
 
 Metro do Porto 3.0 (Metro do Porto, October 2023: https://www.metrodoporto.pt/pages/630?news_id=488).
-Stations are placed on the OSM track as follows:
-- Gondomar II: from the Estudo Prévio in public consultation (participa.pt, Aug-Sep 2026), as
-  reported station by station (Observador, 5 Aug 2026): São Roque on Alameda de Cartes, Cerco
-  on Av. Cidade de León just past the Rotunda de Cartes, Parque Oriental at the roundabout of
-  Av. Cidade de León and Av. Francisco Xavier Esteves, Lagoa north of Rua Luís de Camões and
-  Rua da Capela da Lagoa, Valbom behind Rua Prof. Georgina Nunes das Neves Duarte and Rua
-  Pinheiro d'Aquém, Hospital Fernando Pessoa, Cosme Ferreira Castro and Oliveira Martins on
-  those streets, Souto by Gondomar's bus terminal. Each is the track point nearest the
-  described spot (within 60 m, Parque Oriental 140 m).
+Stations are placed as follows:
+- Gondomar II (Linha LJ Dragão - Souto): from the Estudo Prévio in public consultation
+  (participa.pt, Aug-Sep 2026). OSM's proposed `Linha de Gondomar` follows the same
+  alignment (median 5 m from the track here, at most 62 m), but track and stations are taken
+  from the study itself, from its general plan (P-PR-LJ-2800-PG-DS-AYG-M02101-01), a vector PDF drawn in
+  PT-TM06, north up, at 1:10,000 (its five sports pitches match OSM within 11 m). Stations
+  are the centres of its station markers; the track (tracks/gondomar_lj.geojson) is the centre
+  line of its intervention corridor, from PK 10+000, where the line leaves lines A/B/E/F by the
+  Estádio do Dragão, to past Souto (6.93 km; officially 6.9 km), bent locally through the
+  stations, which it otherwise passes within 17 m. Checked against the PKs of the Relatório
+  Síntese (EIA, alternative 1): São Roque, Cerco and Parque Oriental lie within 5 m of their
+  PK along the track, the stations after Lagoa about 45 m further (the corridor widens at
+  stations). The plan draws alternative 1 (a tunnel between Parque Oriental and Lagoa); the
+  study also has alternative 2, on the surface there and 117 m longer.
 - ISMAI-Muro (Trofa): the EIA in consultation (Aug-Oct 2026) has light rail from ISMAI to
   Muro (3.1 km, stations Ribela and Muro) and a metroBus from Muro to Trofa, left out here.
   Ribela at its bus stop (20 m from the track), Muro at the end of the track.
@@ -50,18 +56,18 @@ there is a metroBus).
 
 PROJECTS = {
     "metro_3_0": [
-        {"ref": "GO", "name": "Linha de Gondomar II", "colour": "#B8962E", "track": "Linha de Gondomar", "km": 6.9,
+        {"ref": "GO", "name": "Linha de Gondomar II", "colour": "#B8962E", "path": "tracks/gondomar_lj.geojson", "km": 6.9,
          "status": "eia", "stations": [
              ("Estádio do Dragão", None),
-             ("São Roque", (-8.57521, 41.16269)),
-             ("Cerco", (-8.57181, 41.15907)),
-             ("Parque Oriental", (-8.56317, 41.15404)),
-             ("Lagoa", (-8.5565, 41.1458)),
-             ("Valbom", (-8.55335, 41.14064)),
-             ("Hospital Fernando Pessoa", (-8.54433, 41.14232)),
-             ("Cosme Ferreira Castro", (-8.5412, 41.14143)),
-             ("Oliveira Martins", (-8.53728, 41.13811)),
-             ("Souto", (-8.53, 41.13634)),
+             ("São Roque", (-8.5744, 41.16151)),
+             ("Cerco", (-8.57199, 41.15851)),
+             ("Parque Oriental", (-8.56654, 41.15482)),
+             ("Lagoa", (-8.55664, 41.14609)),
+             ("Valbom", (-8.552, 41.14024)),
+             ("Hospital Fernando Pessoa", (-8.54336, 41.14257)),
+             ("Cosme Ferreira Castro", (-8.53873, 41.13897)),
+             ("Oliveira Martins", (-8.53511, 41.13599)),
+             ("Souto", (-8.53035, 41.13631)),
          ]},
         {"ref": "TR", "name": "Linha ISMAI – Muro – Trofa", "colour": "#8BC63E", "track": "Linha da Trofa", "km": 3.1,
          "status": "eia_trofa", "stations": [

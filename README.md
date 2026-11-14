@@ -224,12 +224,17 @@ Senhora da Hora II, Os Verdes II, Parque Maia II, Matosinhos Sul II) are listed 
 `interchanges`.
 
 - **Metro do Porto 3.0** ([Metro do Porto, 2023](https://www.metrodoporto.pt/pages/630?news_id=488)).
-  Track: OSM's `railway=proposed` ways of each line (Maia II's way also carries the metroBus spur to
+  **Gondomar II** (Linha LJ Dragão – Souto) is drawn from the Estudo Prévio in public consultation
+  (Aug–Sep 2026): its general plan is a vector PDF in PT-TM06 at 1:10,000, so its station markers
+  give the stations and the centre line of its works corridor gives the track
+  (`pipeline/tracks/gondomar_lj.geojson`, 6.93 km; officially 6.9 km). Distances along it agree
+  with the stations' chainages in the EIA's report (within 5 m to Parque Oriental, about 45 m after
+  Lagoa). It is alternative 1 (in tunnel between Parque Oriental and Lagoa). OSM's proposed
+  Gondomar track follows the same alignment (median 5 m away).
+  The other lines' track: OSM's `railway=proposed` ways (Maia II's way also carries the metroBus spur to
   the airport, cut off at Os Verdes II: the metro option ends there, 13.0 km as officially).
-  Stations are placed on that track: **Gondomar II** from the Estudo Prévio in public consultation
-  (Aug–Sep 2026), whose report places every station by street (all within 60 m of the track but
-  Parque Oriental, 140 m); **ISMAI – Muro** likewise (EIA consultation Aug–Oct 2026; light rail to
-  Muro, then a metroBus to Trofa, not drawn); **São Mamede** and **Maia II** (preliminary studies;
+  Stations are placed on that track: **ISMAI – Muro** from its EIA (consultation Aug–Oct 2026; light
+  rail to Muro, then a metroBus to Trofa, not drawn); **São Mamede** and **Maia II** (preliminary studies;
   Maia II's metro or metroBus not decided, the metro option is drawn) at their named places where
   these are precise, the rest spaced between them in the proportions of Metro do Porto's maps.
 - **PMUS** ([Porto, consultation Sep–Nov 2026](https://mobilidade.cm-porto.pt/destaque/pmus-discussao-publica),

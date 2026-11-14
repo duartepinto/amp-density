@@ -20,7 +20,7 @@ OSM by its route relations' `network` tag:
   planned  lines under construction: OSM has their track (railway=construction, tagged
            with the line's `name` and the network as `operator`) but no routes yet
   projects instead of OSM routes, a set of planned lines in projects.py (stations placed by
-           hand from the plans; track from OSM railway=proposed where mapped)
+           hand from the plans; track from the plans or OSM railway=proposed where mapped)
 `interchanges` names connected stations whose names differ: {shown name: [station names]}.
 `core` is the central municipality (its name and census DTMN21 code): the Lines view splits
 residents inside and outside it.

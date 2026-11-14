@@ -14,7 +14,8 @@ with different names are listed under `interchanges` in regions.py.
 Lines under construction (`planned`) come from their construction track and station
 sites; stations OSM lacks are placed approximately on the track. Projected lines
 (`projects`: projects.py) have their stations placed by hand from the plans, and their
-track from OSM railway=proposed where mapped, else a smooth curve through the stations.
+track from the plans where drawn from them (`path`), else from OSM railway=proposed where
+mapped, else a smooth curve through the stations.
 
 Walking area: everything reachable within WALK_MINUTES at WALK_KMH along OSM streets,
 footpaths and stairs (no motorways), starting from the street points around the
@@ -506,9 +507,13 @@ def project_lines(net: dict, specs: list[dict], proposed: dict, links: dict) -> 
                                     "points": pts[-1][None, :]}, links)
         pts = np.array(pts)
         ways = proposed.get(line.get("track"), [])
-        if ways:
-            track = shapely.ops.linemerge([shapely.LineString(metric([(x, y) for _, x, y in w])) for w in ways])
-            track = max(getattr(track, "geoms", [track]), key=lambda g: g.length)
+        if line.get("path") or ways:
+            if line.get("path"):  # the line's own track, drawn from its plans
+                path = json.loads((ROOT / "pipeline" / line["path"]).read_text())["geometry"]["coordinates"]
+                track = shapely.LineString(metric([tuple(p) for p in path]))
+            else:
+                track = shapely.ops.linemerge([shapely.LineString(metric([(x, y) for _, x, y in w])) for w in ways])
+                track = max(getattr(track, "geoms", [track]), key=lambda g: g.length)
             a, b = (track.project(shapely.Point(p)) for p in (pts[0], pts[-1]))
             coords = np.array(shapely.ops.substring(track, a, b).coords)
             if a > b:
