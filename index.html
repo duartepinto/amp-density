@@ -122,9 +122,14 @@
     .key i { display: inline-block; width: 8px; height: 8px; border-radius: 2px; margin-right: 5px; }
 
     /* Rail networks: one toggle each in the title card, line badges, station hover tooltip */
-    #transit-toggles label { display: flex; gap: 6px; align-items: baseline; margin-top: 8px; font-size: 12px; color: var(--ink-2); cursor: pointer; }
-    #transit-toggles input { margin: 0; accent-color: var(--ink); }
-    #transit-toggles .swatch { flex: none; width: 22px; height: 6px; border-radius: 3px; align-self: center; }
+    #transit-toggles label, #density-toggle label { display: flex; gap: 6px; align-items: baseline; margin-top: 8px; font-size: 12px; color: var(--ink-2); cursor: pointer; }
+    #transit-toggles input, #density-toggle input { margin: 0; accent-color: var(--ink); }
+    #transit-toggles .swatch, #density-toggle .swatch { flex: none; width: 22px; height: 6px; border-radius: 3px; align-self: center; }
+    #density-toggle p { margin: 6px 0 0 19px; font-size: 12px; color: var(--muted); }
+    #density-toggle p[hidden] { display: none; }
+    /* Density switched off and nothing selected: the legend fades with the grid */
+    #legend { transition: opacity 0.2s; }
+    #legend.off { opacity: 0.35; }
     #transit-toggles .swatch.colours { background: linear-gradient(90deg, #3CAEEF 0 33%, #E62621 33% 66%, #8BC63E 66%); }
     #transit-toggles .swatch.dots { background: radial-gradient(circle, var(--ink) 1.6px, transparent 1.9px) 0 50% / 5.5px 6px repeat-x; }
     #transit-toggles .swatch.rail { background: repeating-linear-gradient(90deg, var(--surface) 0 3px, var(--ink) 3px 7px); border: 1.5px solid var(--ink); }
@@ -234,7 +239,7 @@
         border: solid currentColor; border-width: 0 2px 2px 0; transform: translateY(-2px) rotate(225deg);
       }
       #title.folded #fold::before { transform: translateY(-4px) rotate(45deg); }
-      #title.folded #subtitle, #title.folded #status, #title.folded #transit-toggles, #title.folded .card-foot { display: none; }
+      #title.folded #subtitle, #title.folded #status, #title.folded #density-toggle, #title.folded #transit-toggles, #title.folded .card-foot { display: none; }
       #title.folded #legend { margin-bottom: 14px; }
       #title.folded #views { margin-top: 0; }
       /* Bottom sheet: a short peek at the top of the details, tap or swipe up for the rest. */
@@ -267,6 +272,10 @@
     <p class="muted" id="subtitle">Residents per km² · Census 2021</p>
     <div id="legend"></div>
     <p class="muted small" id="status">Loading grid…</p>
+    <div id="density-toggle">
+      <label><input type="checkbox" checked><i class="swatch"></i><span id="density-text">Population density grid</span></label>
+      <p id="density-note" hidden></p>
+    </div>
     <div id="transit-toggles"></div>
     <div id="views" role="group" aria-label="View" hidden>
       <button type="button" data-view="map" aria-pressed="true">Map</button>
@@ -337,6 +346,10 @@
     let lineSel = null; // in the lines view, the ref of the line shown
     const lineSorts = {}; // lines view, per table: {col, dir} (dir -1: largest first); none: in line order
     let poiSort = "name"; // a line's points of interest: by "name", "kind" or "station"
+    // The density grid's switch, kept as the viewer last left it. Switched off, the grid still
+    // shows while a station, a line or a cell is selected.
+    let densityOn = true;
+    try { densityOn = localStorage.getItem("density") !== "off"; } catch {}
     // isStyleLoaded() is false while tiles load, so track "style.load" ourselves.
     let styleReady = false;
     const startedWithView = Boolean(location.hash); // MapLibre writes the hash on load
@@ -368,6 +381,8 @@
         close: "Close",
         showMore: "Show more",
         showLess: "Show less",
+        densityToggle: "Population density grid",
+        densityOff: "Shown only while a station or line is selected.",
         language: "Language",
         coffee: "Buy me a coffee",
         credits: `Census: <a href="https://censos.ine.pt">INE Censos 2021 (BGRI)</a> ·
@@ -557,6 +572,8 @@
         close: "Fechar",
         showMore: "Mostrar mais",
         showLess: "Mostrar menos",
+        densityToggle: "Grelha de densidade populacional",
+        densityOff: "Visível só com uma estação ou linha selecionada.",
         language: "Idioma",
         coffee: "Ofereça-me um café",
         credits: `Dados dos Censos 2021: <a href="https://censos.ine.pt">INE (BGRI)</a> ·
@@ -789,6 +806,7 @@
       document.getElementById("legend").innerHTML = BREAKS.map(
         (b, i) => `<div class="sw" style="background:${RAMP[i]}"><span>${compact(b)}</span></div>`
       ).join("");
+      document.querySelector("#density-toggle .swatch").style.background = `linear-gradient(90deg, ${RAMP.join(", ")})`;
     }
 
     function buildGeoJSON() {
@@ -856,6 +874,25 @@
         map.setFeatureState({ source: "cells", id: selected }, { selected: true });
         highlightBuildings();
       }
+      applyDensity();
+    }
+
+    // The grid shows when switched on, or while something is selected.
+    function applyDensity() {
+      const visible = densityOn || selected !== null || station !== null || lineSel !== null;
+      for (const id of ["cells-fill", "cells-line"]) {
+        if (map.getLayer(id)) map.setLayoutProperty(id, "visibility", visible ? "visible" : "none");
+      }
+      // Cells aren't hovered while switched off, and a hidden layer fires no "mouseleave":
+      // drop the hover outline ourselves.
+      if (!densityOn && hovered !== null) {
+        map.setFeatureState({ source: "cells", id: hovered }, { hover: false });
+        hovered = null;
+        map.getCanvas().style.cursor = "";
+      }
+      document.getElementById("legend").classList.toggle("off", !visible);
+      document.querySelector("#density-toggle input").checked = densityOn;
+      document.getElementById("density-note").hidden = densityOn;
     }
 
     // CARTO names these "roads"/"buildings"; OpenMapTiles styles "transportation"/"building".
@@ -1183,6 +1220,7 @@
     function selectStation(i) {
       if (station !== null && map.getSource("stations")) markStation(station, false);
       station = i;
+      applyDensity();
       if (i === null) {
         map.getSource("walk")?.setData(EMPTY);
         map.getSource("drive")?.setData(EMPTY);
@@ -1235,6 +1273,7 @@
       }
       view = next;
       lineSel = null;
+      applyDensity();
       for (const b of document.querySelectorAll("#views button")) b.setAttribute("aria-pressed", b.dataset.view === view);
       try {
         const url = new URL(location.href);
@@ -1259,6 +1298,7 @@
         applyNetworkFilters();
       }
       lineSel = ref;
+      applyDensity();
       highlightLine(ref);
       renderLines();
       expandPanel(ref === null); // phones: the overview fills the sheet; a line peeks, so the map shows
@@ -1520,6 +1560,7 @@
     function select(i) {
       if (selected !== null) map.setFeatureState({ source: "cells", id: selected }, { selected: false });
       selected = i;
+      applyDensity();
       if (i === null) {
         closePanel();
         highlightBuildings();
@@ -1540,6 +1581,7 @@
 
     let hovered = null;
     map.on("mousemove", "cells-fill", (ev) => {
+      if (!densityOn) return; // switched off, the grid shown for a selection can't be picked
       const id = ev.features[0].id;
       if (hovered === id) return;
       if (hovered !== null) map.setFeatureState({ source: "cells", id: hovered }, { hover: false });
@@ -1585,7 +1627,8 @@
         return selectStation(st.id);
       }
       if (view === "lines") return; // cells aren't picked in the lines view
-      const hit = map.queryRenderedFeatures(ev.point, { layers: ["cells-fill"] })[0];
+      // Switched off, the grid only shows for a station: a click beside it closes the station.
+      const hit = densityOn && map.queryRenderedFeatures(ev.point, { layers: ["cells-fill"] })[0];
       if (hit) return select(hit.id);
       select(null);
       selectStation(null);
@@ -1661,6 +1704,11 @@
       if (!row) return;
       ev.preventDefault();
       selectLine(row.dataset.line);
+    });
+    document.querySelector("#density-toggle input").addEventListener("change", (ev) => {
+      densityOn = ev.target.checked;
+      try { localStorage.setItem("density", densityOn ? "on" : "off"); } catch {}
+      applyDensity();
     });
     document.getElementById("transit-toggles").addEventListener("change", (ev) => {
       const key = ev.target.dataset.net;
@@ -1788,6 +1836,8 @@
       document.getElementById("views").setAttribute("aria-label", t("views"));
       for (const b of document.querySelectorAll("#views button")) b.textContent = t(b.dataset.view === "map" ? "viewMap" : "viewLines");
       renderLegend();
+      document.getElementById("density-text").textContent = t("densityToggle");
+      document.getElementById("density-note").textContent = t("densityOff");
       renderGridText();
       if (transit) renderToggles();
       if (panel.hidden) return;
@@ -1807,6 +1857,7 @@
     });
 
     applyLang();
+    applyDensity();
     loadData()
       .then((json) => {
         data = json;
