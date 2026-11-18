@@ -1288,6 +1288,7 @@
       panel.hidden = false;
       expandPanel(true);
       foldTitle(true);
+      syncWatchers();
     }
 
     function selectLine(ref) {
@@ -1304,6 +1305,7 @@
       expandPanel(ref === null); // phones: the overview fills the sheet; a line peeks, so the map shows
       document.getElementById("panel-body").scrollTop = 0;
       if (ref !== null) fitArea(lines.lines[ref].area);
+      syncWatchers();
     }
 
     function renderLines() {
@@ -1524,11 +1526,33 @@
       panel.hidden = false;
       expandPanel(false);
       foldTitle(true);
+      syncWatchers();
     }
     function closePanel() {
       panel.hidden = true;
       panel.classList.remove("lines");
       foldTitle(titleFolded);
+      syncWatchers();
+    }
+    // Android's back button, and Escape, close what's open a step at a time: a line's details
+    // back to the lines' tables, then the panel. One CloseWatcher per step, so back is the
+    // browser's own once nothing is open. Without CloseWatcher, Escape is handled below.
+    const watchers = [];
+    function syncWatchers() {
+      if (!("CloseWatcher" in window)) return;
+      const depth = panel.hidden ? 0 : view === "lines" && lineSel !== null ? 2 : 1;
+      while (watchers.length > depth) watchers.pop().destroy();
+      while (watchers.length < depth) {
+        const w = new CloseWatcher();
+        w.onclose = () => {
+          const i = watchers.indexOf(w);
+          if (i < 0) return;
+          watchers.splice(i, 1);
+          if (view === "lines" && lineSel !== null) selectLine(null);
+          else clearAll();
+        };
+        watchers.push(w);
+      }
     }
     // Phones: the title card folds while something is selected, and otherwise as the
     // viewer last left it with its fold button.
@@ -1666,7 +1690,7 @@
       else if (dy > 30 && !expanded) clearAll();
     });
     document.addEventListener("keydown", (ev) => {
-      if (ev.key !== "Escape") return;
+      if (ev.key !== "Escape" || "CloseWatcher" in window) return; // CloseWatcher handles it
       if (view === "lines" && lineSel !== null) selectLine(null);
       else clearAll();
     });
